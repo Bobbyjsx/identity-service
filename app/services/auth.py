@@ -5,26 +5,31 @@ from fastapi import HTTPException
 
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password
-from app.models.user import UserModel
-from app.models.refresh_token import RefreshTokenModel
-from app.repositories.user import UserRepository
+from app.repositories.application import ApplicationRepository
 from app.repositories.refresh_token import RefreshTokenRepository
-from app.schemas.user import UserCreate
+from app.repositories.user import UserRepository
+from app.schemas.refresh_token import RefreshTokenModel
+from app.schemas.user import UserCreate, UserModel
 from app.services.key_manager import key_manager
 
 
 class AuthService:
-    def __init__(self, user_repo: UserRepository, refresh_token_repo: RefreshTokenRepository):
+    def __init__(self, user_repo: UserRepository, refresh_token_repo: RefreshTokenRepository, app_repo: ApplicationRepository):
         """
         Initializes the AuthService.
         """
         self.user_repo = user_repo
         self.refresh_token_repo = refresh_token_repo
+        self.app_repo = app_repo
 
     async def signup(self, app_id: str, user_in: UserCreate):
         """
         Registers a new user for a specific application tenant.
         """
+        app_check = await self.app_repo.get_by_client_id(app_id)
+        if not app_check:
+            raise HTTPException(status_code=403, detail="Invalid application context")
+
         existing = await self.user_repo.get_by_email(app_id, user_in.email)
         if existing:
             raise HTTPException(status_code=400, detail="User already exists")
@@ -45,6 +50,10 @@ class AuthService:
         """
         Authenticates a user and issues a standard User JWT.
         """
+        app_check = await self.app_repo.get_by_client_id(app_id)
+        if not app_check:
+            raise HTTPException(status_code=403, detail="Invalid application context")
+
         user = await self.user_repo.get_by_email(app_id, user_in.email)
         if not user or not verify_password(user_in.password, user["hashed_password"]):
             raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -53,10 +62,11 @@ class AuthService:
         now = datetime.now(timezone.utc)
         exp = now + timedelta(minutes=settings.jwt_expiration_minutes)
         payload = {
-            "iss": "identity-service",
+            "iss": settings.jwt_issuer,
             "sub": user["id"],
             "aud": "application_api",
             "app_id": app_id,
+            "type": "user",
             "roles": user.get("roles", []),
             "iat": int(now.timestamp()),
             "exp": int(exp.timestamp()),
@@ -80,17 +90,18 @@ class AuthService:
             "refresh_token": refresh_data.token
         }
 
-    def generate_service_token(self, app_id: str):
+    def generate_service_token(self, app_id: str, audience: str):
         """
         Generates a short-lived Service JWT for app-to-app authentication.
         """
         now = datetime.now(timezone.utc)
         exp = now + timedelta(minutes=settings.jwt_expiration_minutes)
         payload = {
-            "iss": "identity-service",
+            "iss": settings.jwt_issuer,
             "sub": f"service:{app_id}",
-            "aud": "target-service",
+            "aud": audience,
             "app_id": app_id,
+            "type": "service",
             "iat": int(now.timestamp()),
             "exp": int(exp.timestamp()),
             "jti": uuid.uuid4().hex,
@@ -128,10 +139,11 @@ class AuthService:
         now = datetime.now(timezone.utc)
         exp = now + timedelta(minutes=settings.jwt_expiration_minutes)
         payload = {
-            "iss": "identity-service",
+            "iss": settings.jwt_issuer,
             "sub": user["id"],
             "aud": "application_api",
             "app_id": user["app_id"],
+            "type": "user",
             "roles": user.get("roles", []),
             "iat": int(now.timestamp()),
             "exp": int(exp.timestamp()),

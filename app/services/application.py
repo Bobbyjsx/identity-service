@@ -3,16 +3,17 @@ import secrets
 from fastapi import HTTPException
 
 from app.core.security import get_password_hash, verify_password
-from app.models.application import ApplicationCredentialModel, ApplicationModel
-from app.models.enums import StatusEnum
 from app.repositories.application import (
     ApplicationCredentialRepository,
     ApplicationRepository,
 )
 from app.schemas.application import (
     ApplicationCreate,
+    ApplicationCredentialModel,
     ApplicationCredentials,
+    ApplicationModel,
 )
+from app.schemas.enums import StatusEnum
 
 
 class ApplicationService:

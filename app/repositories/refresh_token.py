@@ -1,7 +1,10 @@
 from typing import Any
+
 from google.cloud.firestore_v1.async_client import AsyncClient
 from google.cloud.firestore_v1.base_query import FieldFilter
+
 from app.repositories.base import BaseRepository
+
 
 class RefreshTokenRepository(BaseRepository):
     def __init__(self, db: AsyncClient):
