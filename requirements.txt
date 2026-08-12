@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+pydantic[email]
+pydantic-settings
+google-cloud-firestore
+firebase-admin
+argon2-cffi
+passlib[argon2]
+cryptography
+PyJWT
+python-multipart
+httpx
+pytest
+pytest-asyncio
+ruff
