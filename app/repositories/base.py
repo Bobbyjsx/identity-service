@@ -31,6 +31,7 @@ class BaseRepository:
         if id:
             doc_ref = self.collection.document(id)
             await doc_ref.set(data)
+            data["id"] = id
         else:
             doc_ref = self.collection.document()
             await doc_ref.set(data)

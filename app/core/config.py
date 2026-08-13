@@ -6,6 +6,10 @@ class Settings(BaseSettings):
     firestore_database: str = "(default)"
     google_application_credentials: str = "firebase-credentials.json"
 
+    admin_secret: str = "changeme-in-prod"
+    jwt_issuer: str = "urn:identity-service"
+    private_key: str | None = None
+
     jwt_expiration_minutes: int = 15
     refresh_token_expiration_days: int = 30
 

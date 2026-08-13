@@ -1,6 +1,8 @@
 import secrets
 from datetime import datetime, timezone
+
 from pydantic import BaseModel, Field
+
 
 class RefreshTokenModel(BaseModel):
     token: str = Field(default_factory=lambda: secrets.token_urlsafe(48))
