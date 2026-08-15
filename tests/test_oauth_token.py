@@ -8,6 +8,7 @@ from httpx import AsyncClient
 
 from app.core.config import settings
 from tests.conftest import (
+    CLIENT_CREDENTIALS_OAUTH,
     REDIRECT_URI,
     authorize_and_get_transaction,
     create_application,
@@ -65,14 +66,10 @@ async def _exchange(
 
 @pytest.mark.asyncio
 async def test_valid_authorization_code_exchange(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data)
 
-    resp = await _exchange(
-        async_client, code=code, verifier=verifier, client_id=app_data["client_id"]
-    )
+    resp = await _exchange(async_client, code=code, verifier=verifier, client_id=app_data["client_id"])
     assert resp.status_code == 200, resp.text
     data = resp.json()
     assert "access_token" in data
@@ -82,7 +79,7 @@ async def test_valid_authorization_code_exchange(async_client: AsyncClient):
     assert "id_token" in data  # openid scope requested
 
     access = jwt.decode(data["access_token"], options={"verify_signature": False})
-    assert access["iss"] == settings.jwt_issuer
+    assert access["iss"] == settings.identity_issuer
     assert access["type"] == "user"
     assert access["aud"] == "application_api"
     assert access["app_id"] == app_data["client_id"]
@@ -90,7 +87,8 @@ async def test_valid_authorization_code_exchange(async_client: AsyncClient):
     assert access["roles"] == []
 
     id_token = jwt.decode(data["id_token"], options={"verify_signature": False})
-    assert id_token["iss"] == settings.oidc_issuer
+    assert id_token["iss"] == settings.identity_issuer
+    assert id_token["iss"] == access["iss"]
     assert id_token["aud"] == app_data["client_id"]
     assert id_token["sub"] == access["sub"]
     assert id_token["exp"] > id_token["iat"]
@@ -101,31 +99,23 @@ async def test_valid_authorization_code_exchange(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_access_token_verifiable_and_useful(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data)
     data = (await _exchange(async_client, code=code, verifier=verifier, client_id=app_data["client_id"])).json()
 
     # Access token works against the existing /auth/me endpoint
-    resp = await async_client.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {data['access_token']}"}
-    )
+    resp = await async_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {data['access_token']}"})
     assert resp.status_code == 200
     assert resp.json()["email"]
 
 
 @pytest.mark.asyncio
 async def test_refresh_token_from_exchange_works(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data)
     data = (await _exchange(async_client, code=code, verifier=verifier, client_id=app_data["client_id"])).json()
 
-    resp = await async_client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]}
-    )
+    resp = await async_client.post("/api/v1/auth/refresh", json={"refresh_token": data["refresh_token"]})
     assert resp.status_code == 200
     new_tokens = resp.json()
     assert "access_token" in new_tokens
@@ -134,9 +124,7 @@ async def test_refresh_token_from_exchange_works(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_no_openid_scope_no_id_token(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data, scope="")
     data = (await _exchange(async_client, code=code, verifier=verifier, client_id=app_data["client_id"])).json()
     assert data.get("id_token") is None
@@ -146,44 +134,36 @@ async def test_no_openid_scope_no_id_token(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_invalid_code_rejected(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     _, verifier, _ = await _full_flow(async_client, app_data)
-    resp = await _exchange(
-        async_client, code="code_fake", verifier=verifier, client_id=app_data["client_id"]
-    )
+    resp = await _exchange(async_client, code="code_fake", verifier=verifier, client_id=app_data["client_id"])
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_grant"
 
 
 @pytest.mark.asyncio
 async def test_expired_code_rejected(async_client: AsyncClient, db):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data)
 
     from app.core.security import hash_token
 
     docs = db.collection("authorization_codes").where("code_hash", "==", hash_token(code)).stream()
     async for doc in docs:
-        await db.collection("authorization_codes").document(doc.id).update(
-            {"expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()}
+        await (
+            db.collection("authorization_codes")
+            .document(doc.id)
+            .update({"expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()})
         )
 
-    resp = await _exchange(
-        async_client, code=code, verifier=verifier, client_id=app_data["client_id"]
-    )
+    resp = await _exchange(async_client, code=code, verifier=verifier, client_id=app_data["client_id"])
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_grant"
 
 
 @pytest.mark.asyncio
 async def test_reused_code_rejected(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data)
 
     first = await _exchange(async_client, code=code, verifier=verifier, client_id=app_data["client_id"])
@@ -196,12 +176,8 @@ async def test_reused_code_rejected(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_wrong_client_rejected(async_client: AsyncClient):
-    app_a = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
-    app_b = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_a = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
+    app_b = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_a)
 
     resp = await _exchange(async_client, code=code, verifier=verifier, client_id=app_b["client_id"])
@@ -211,9 +187,7 @@ async def test_wrong_client_rejected(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_wrong_redirect_uri_rejected(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data)
 
     resp = await _exchange(
@@ -229,24 +203,18 @@ async def test_wrong_redirect_uri_rejected(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_wrong_pkce_verifier_rejected(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, _, _ = await _full_flow(async_client, app_data)
     wrong_verifier, _ = pkce_pair()
 
-    resp = await _exchange(
-        async_client, code=code, verifier=wrong_verifier, client_id=app_data["client_id"]
-    )
+    resp = await _exchange(async_client, code=code, verifier=wrong_verifier, client_id=app_data["client_id"])
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_grant"
 
 
 @pytest.mark.asyncio
 async def test_missing_pkce_verifier_rejected(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, _, _ = await _full_flow(async_client, app_data)
 
     resp = await async_client.post(
@@ -290,7 +258,7 @@ async def test_client_credentials_flow_still_works(async_client: AsyncClient):
     The existing service-token flow must continue to work on the new token
     endpoint and the legacy endpoint.
     """
-    app_data = await create_application(async_client)
+    app_data = await create_application(async_client, config={"oauth": CLIENT_CREDENTIALS_OAUTH})
 
     for endpoint in ("/api/v1/oauth/token", "/api/v1/auth/oauth/token"):
         resp = await async_client.post(
@@ -311,7 +279,7 @@ async def test_client_credentials_flow_still_works(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_client_credentials_bad_secret_still_rejected(async_client: AsyncClient):
-    app_data = await create_application(async_client)
+    app_data = await create_application(async_client, config={"oauth": CLIENT_CREDENTIALS_OAUTH})
     resp = await async_client.post(
         "/api/v1/oauth/token",
         data={
@@ -331,9 +299,7 @@ async def test_authorization_code_with_client_secret(async_client: AsyncClient):
     Confidential-client style exchange: providing the correct client_secret
     must succeed; a wrong secret must be rejected.
     """
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data)
 
     resp = await _exchange(
@@ -358,7 +324,7 @@ async def test_authorization_code_with_client_secret(async_client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_grant_disabled_for_application(async_client: AsyncClient):
+async def test_authorization_code_grant_disabled_rejected_at_authorize(async_client: AsyncClient):
     app_data = await create_application(
         async_client,
         config={
@@ -368,17 +334,22 @@ async def test_grant_disabled_for_application(async_client: AsyncClient):
             }
         },
     )
-    code, verifier, _ = await _full_flow(async_client, app_data)
-    resp = await _exchange(async_client, code=code, verifier=verifier, client_id=app_data["client_id"])
-    assert resp.status_code == 400
-    assert resp.json()["error"] == "invalid_grant"
+    from tests.conftest import authorize_params
+
+    resp = await async_client.get(
+        "/api/v1/oauth/authorize",
+        params=authorize_params(app_data["client_id"]),
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    from urllib.parse import parse_qs, urlparse
+
+    assert parse_qs(urlparse(resp.headers["location"]).query)["error"][0] == "unauthorized_client"
 
 
 @pytest.mark.asyncio
 async def test_user_deleted_after_code_issued(async_client: AsyncClient, db):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, email = await _full_flow(async_client, app_data)
 
     users = db.collection("users").where("app_id", "==", app_data["client_id"]).stream()
@@ -397,15 +368,11 @@ async def test_concurrent_redemption_single_use(async_client: AsyncClient):
     Race condition test: two concurrent redemption attempts for the same code.
     Exactly one must succeed.
     """
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     code, verifier, _ = await _full_flow(async_client, app_data)
 
     async def redeem():
-        return await _exchange(
-            async_client, code=code, verifier=verifier, client_id=app_data["client_id"]
-        )
+        return await _exchange(async_client, code=code, verifier=verifier, client_id=app_data["client_id"])
 
     results = await asyncio.gather(redeem(), redeem())
     statuses = sorted(r.status_code for r in results)

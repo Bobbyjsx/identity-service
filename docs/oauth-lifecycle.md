@@ -90,6 +90,9 @@ for the ones you want. Include `openid` if you need an ID token.
 Keep the verifier on your server (or in a secure cookie you set). Do not
 put it on the authorize URL.
 
+PKCE is required for every authorization-code request, including
+confidential clients. `code_challenge_method` must be `S256`.
+
 ### 2. Identity Service opens a transaction
 
 Before anything is written, the service checks:
@@ -103,6 +106,10 @@ Before anything is written, the service checks:
 If the redirect URI is known and a later check fails, the browser is sent
 back to that URI with `error`, `error_description`, and `state`. The
 application configuration is never placed on a URL.
+
+The service also checks that the `authorization_code` grant is enabled
+for the application. If it is not, and the redirect URI is registered,
+the browser is sent back with `unauthorized_client`.
 
 On success a row is written to `oauth_transactions` in state `pending`.
 The browser is redirected to the Identity UI with only the transaction id:
@@ -178,8 +185,12 @@ code=<code from the callback>
 client_id=<client_id>
 redirect_uri=<the same URI as step 1>
 code_verifier=<the verifier from step 1>
-client_secret=<optional, for confidential clients>
+client_secret=<required for confidential clients>
 ```
+
+`client_type=public` (the default) does not require `client_secret`.
+`client_type=confidential` rejects the request without one. Sending a
+wrong secret is always `invalid_client`.
 
 The service checks the code exists, is unexpired and unused, belongs to
 this client, matches this redirect URI, that the application is still
@@ -212,24 +223,37 @@ Refresh is not part of this endpoint. Use `POST /api/v1/auth/refresh`.
 A transaction is the server-side record of one in-progress login. It
 expires after ten minutes by default.
 
+Written transitions are enforced atomically inside a Firestore
+transaction. Two concurrent logins cannot both progress the same
+transaction.
+
 ```
-pending ──authenticate──► completed ──► (code redeemed at /token)
-    │
-    └──email required──► authenticated ──verify-email──► completed
+pending ──claim + issue code──► completed          (no email verification)
+pending ──claim──► authenticated ──verify + issue code──► completed
 ```
 
-`cancelled` is a user abort. `expired` is computed from `expires_at` when
-the row is read; it is not a background job.
+```
+pending ──► cancelled
+authenticated ──► cancelled
+pending / authenticated ──► expired   (derived from expires_at, not written as a transition)
+```
+
+Invalid transitions fail. A completed or cancelled transaction cannot be
+reused for login or signup. An expired transaction cannot proceed.
 
 | State | Meaning | What the UI can do |
 | --- | --- | --- |
 | `pending` | Request accepted, nobody has signed in | login, signup, forgot-password, cancel |
-| `authenticated` | Signed in, waiting on email verification | verify-email, cancel |
-| `completed` | Authorization code has been issued | cancel only |
+| `authenticated` | Claimed by one authentication request | verify-email (if required), cancel |
+| `completed` | Authorization code has been issued | nothing |
 | `cancelled` / `expired` | Dead | nothing |
 
-The code, not the transaction, is what prevents double use. Completing
-the transaction a second time is not how you get a second code.
+`expired` is computed from `expires_at` when the row is read. Cleanup of
+stale documents is optional and is not what makes them unusable.
+
+Authorization-code issuance happens only after the `pending` →
+`authenticated` claim succeeds, and the code row is written in the same
+Firestore transaction as `authenticated` → `completed`.
 
 ## Email verification
 
@@ -239,7 +263,12 @@ token is emailed (in development the notification is logged, not sent).
 The user follows the link, the UI posts the token to
 `/transactions/{tx}/verify-email`, and the flow continues to a code.
 
-The verification token is stored only as a hash and is single-use.
+The verification token is stored only as a hash, is single-use, and is
+bound to the application and user that requested it. A token minted for
+application A cannot advance a transaction for application B.
+
+The transaction remains bound to its original client, redirect URI, PKCE
+challenge, and scopes throughout.
 
 ## Password reset
 

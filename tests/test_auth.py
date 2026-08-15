@@ -49,7 +49,7 @@ async def test_valid_signup_and_token_format(async_client: AsyncClient):
     # Decode token without verification to inspect claims
     unverified_claims = jwt.decode(access_token, options={"verify_signature": False})
 
-    assert unverified_claims["iss"] == settings.jwt_issuer
+    assert unverified_claims["iss"] == settings.identity_issuer
     assert unverified_claims["type"] == "user"
     assert unverified_claims["aud"] == "application_api"
 
@@ -58,7 +58,12 @@ async def test_valid_signup_and_token_format(async_client: AsyncClient):
 async def test_service_token_audience(async_client: AsyncClient):
     # Create App
     app_resp = await async_client.post(
-        "/api/v1/applications", json={"name": "Test App"}, headers={"x-admin-token": settings.admin_secret}
+        "/api/v1/applications",
+        json={
+            "name": "Test App",
+            "oauth": {"allowed_grants": ["authorization_code", "client_credentials"]},
+        },
+        headers={"x-admin-token": settings.admin_secret},
     )
     app_data = app_resp.json()
     client_id = app_data["client_id"]
@@ -78,6 +83,6 @@ async def test_service_token_audience(async_client: AsyncClient):
     token_data = token_resp.json()
 
     unverified_claims = jwt.decode(token_data["access_token"], options={"verify_signature": False})
-    assert unverified_claims["iss"] == settings.jwt_issuer
+    assert unverified_claims["iss"] == settings.identity_issuer
     assert unverified_claims["type"] == "service"
     assert unverified_claims["aud"] == "custom_file_service"

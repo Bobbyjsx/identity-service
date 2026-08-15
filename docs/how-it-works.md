@@ -48,8 +48,21 @@ Two identifiers come back:
 
 - **`client_id`** — public. You put it in `X-Application-Id` and in OAuth
   `client_id`. User records store this value as `app_id`.
-- **`client_secret`** — private, shown once. Used for confidential clients
-  and for machine-to-machine tokens. Only a hash is stored.
+- **`client_secret`** — private, shown once. Required for confidential
+  clients and for machine-to-machine tokens. Only a hash is stored.
+
+Every application also has a **`client_type`**:
+
+| Type | Typical app | Token exchange |
+| --- | --- | --- |
+| `public` (default) | Browser SPA, mobile | PKCE required. `client_secret` is not required. |
+| `confidential` | Server-side web / backend | PKCE required. `client_secret` is required. |
+
+Existing applications that have no `client_type` field are treated as
+`public`. PKCE is required for both types. Client type does not weaken it.
+
+Applications do **not** get the `client_credentials` grant unless you
+enable it. The default grant list is `authorization_code` only.
 
 There is also an internal Firestore document id on the application. Service
 tokens put that internal id in their `app_id` claim. When you are integrating,
@@ -61,7 +74,7 @@ Firestore is the only datastore. Each concern has its own collection.
 
 | Collection | Holds |
 | --- | --- |
-| `applications` | Name, status, branding, auth policy, OAuth settings, `client_id` |
+| `applications` | Name, status, `client_type`, branding, auth policy, OAuth settings, `client_id` |
 | `application_credentials` | Argon2id hash of the client secret |
 | `users` | Email, password hash, profile, roles, `email_verified`, scoped by `app_id` (`client_id`) |
 | `roles` / `permissions` | RBAC definitions scoped to an application |
@@ -131,17 +144,19 @@ This is the data flow, not the HTTP flow.
    It binds the client, redirect URI, scopes, PKCE challenge, and optional
    `state` / `nonce`. Nothing sensitive is put in the browser URL except
    the transaction id.
-2. **Login or signup.** The user row is read or created in `users`. If the
-   application requires a verified email and the user is unverified, the
-   transaction moves to `authenticated` and a hashed verification token is
-   stored. Otherwise an authorization code is issued immediately.
-3. **Code issued.** A row is inserted into `authorization_codes` with the
-   SHA-256 of the raw code. The transaction moves to `completed`. The raw
-   code is returned only in the callback URL.
+2. **Login or signup.** The user row is read or created in `users`. Then
+   the transaction is *claimed* atomically. Only one concurrent request
+   can win that claim.
+3. **Code issued, or wait for email.** If the application requires a
+   verified email and the user is unverified, the claim is
+   `pending` → `authenticated` and a hashed verification token is stored.
+   Otherwise the claim is `pending` → `completed` in the same Firestore
+   transaction as the authorization-code insert.
 4. **Token exchange.** The code is looked up by hash, every binding is
    checked, and the row is marked `used` inside a Firestore transaction.
    An access JWT is signed. A refresh-token row is inserted. If `openid`
-   was granted, an ID token is signed too.
+   was granted, an ID token is signed too. All JWTs share one issuer
+   (`IDENTITY_ISSUER`).
 
 A failed login writes nothing durable except the existing transaction.
 Forgot-password writes a hashed reset token only when the email exists,

@@ -9,15 +9,19 @@ from app.repositories.application import (
     ApplicationRepository,
 )
 from app.schemas.application import (
+    DEFAULT_ALLOWED_GRANTS,
+    DEFAULT_ALLOWED_SCOPES,
+    DEFAULT_CLIENT_TYPE,
+    KNOWN_OAUTH_SCOPES,
+    ApplicationAuthenticationConfig,
+    ApplicationBranding,
     ApplicationCreate,
     ApplicationCredentialModel,
     ApplicationCredentials,
     ApplicationModel,
+    ApplicationOAuthConfig,
 )
 from app.schemas.enums import StatusEnum
-
-DEFAULT_ALLOWED_SCOPES = ["openid", "profile", "email"]
-DEFAULT_ALLOWED_GRANTS = ["authorization_code", "client_credentials"]
 
 
 def get_app_branding(app: dict[str, Any]) -> dict:
@@ -43,29 +47,40 @@ def get_app_authentication_config(app: dict[str, Any]) -> dict:
 def get_app_oauth_config(app: dict[str, Any]) -> dict:
     """Returns application OAuth configuration with backwards-compatible defaults."""
     oauth = app.get("oauth") or {}
+    raw_scopes = oauth.get("allowed_scopes", DEFAULT_ALLOWED_SCOPES)
     return {
         "redirect_uris": oauth.get("redirect_uris", []),
-        "allowed_scopes": oauth.get("allowed_scopes", DEFAULT_ALLOWED_SCOPES),
+        "allowed_scopes": [s for s in raw_scopes if s in KNOWN_OAUTH_SCOPES],
         "allowed_grants": oauth.get("allowed_grants", DEFAULT_ALLOWED_GRANTS),
     }
 
 
+def get_app_client_type(app: dict[str, Any]) -> str:
+    """Existing applications without client_type are treated as public."""
+    return app.get("client_type") or DEFAULT_CLIENT_TYPE
+
+
 class ApplicationService:
     def __init__(self, app_repo: ApplicationRepository, cred_repo: ApplicationCredentialRepository):
-        """
-        Initializes the ApplicationService.
-        """
         self.app_repo = app_repo
         self.cred_repo = cred_repo
 
     async def register_application(self, app_in: ApplicationCreate) -> ApplicationCredentials:
         """
         Registers a new application and generates a client ID and secret.
+        Optional branding, authentication, OAuth, and client_type are stored
+        atomically with the application document.
         """
-        app_data = ApplicationModel(name=app_in.name, description=app_in.description).model_dump(mode="json")
+        app_data = ApplicationModel(
+            name=app_in.name,
+            description=app_in.description,
+            client_type=app_in.client_type,
+            branding=app_in.branding or ApplicationBranding(),
+            authentication=app_in.authentication or ApplicationAuthenticationConfig(),
+            oauth=app_in.oauth or ApplicationOAuthConfig(),
+        ).model_dump(mode="json")
         created_app = await self.app_repo.create(app_data)
 
-        # Generate client secret
         client_secret = secrets.token_urlsafe(32)
         hashed_secret = get_password_hash(client_secret)
 
@@ -74,18 +89,13 @@ class ApplicationService:
 
         return ApplicationCredentials(
             client_id=created_app["client_id"],
-            client_secret=client_secret  # Only shown once
+            client_secret=client_secret,
         )
 
     async def get_application_by_client_id(self, client_id: str) -> dict[str, Any] | None:
-        """
-        Retrieves an application document by client_id.
-        """
         return await self.app_repo.get_by_client_id(client_id)
 
-    async def update_application_config(
-        self, client_id: str, updates: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def update_application_config(self, client_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         """
         Applies a partial (merge) configuration update to an application document.
 
@@ -105,13 +115,13 @@ class ApplicationService:
                 merged = dict(app.get(namespace) or {})
                 merged.update(incoming)
                 patch[namespace] = merged
-        for field in ("name", "description"):
+        for field in ("name", "description", "client_type"):
             if (updates or {}).get(field) is not None:
                 patch[field] = updates[field]
 
         if patch:
             await doc_ref.update(patch)
-        return await self.app_repo.get(client_id) or app
+        return await self.app_repo.get(app["id"]) or app
 
     async def verify_client_credentials(self, client_id: str, client_secret: str) -> str:
         """

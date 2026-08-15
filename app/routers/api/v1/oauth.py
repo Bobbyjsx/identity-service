@@ -62,9 +62,7 @@ async def create_transaction(
 
 
 @router.get("/transactions/{transaction_id}", response_model=OAuthTransactionResponse)
-async def load_transaction(
-    transaction_id: str, service: OAuthService = Depends(get_oauth_service)
-):
+async def load_transaction(transaction_id: str, service: OAuthService = Depends(get_oauth_service)):
     """
     Loads safe transaction context for the hosted Identity UI.
 
@@ -149,9 +147,7 @@ async def transaction_verify_email(
 
 
 @router.post("/transactions/{transaction_id}/cancel")
-async def transaction_cancel(
-    transaction_id: str, service: OAuthService = Depends(get_oauth_service)
-):
+async def transaction_cancel(transaction_id: str, service: OAuthService = Depends(get_oauth_service)):
     """
     Cancels an authorization transaction (user aborted authentication).
     """
@@ -182,6 +178,8 @@ async def oauth_token(
             raise OAuthError("invalid_client", "client_secret is required")
         if not audience:
             raise OAuthError("invalid_request", "audience is required for client_credentials")
+        app = await oauth_service.resolve_client(client_id)
+        oauth_service.validate_grant_allowed(app, "client_credentials")
         try:
             app_id = await app_service.verify_client_credentials(client_id, client_secret)
         except HTTPException as exc:
@@ -206,9 +204,7 @@ async def oauth_token(
 
 
 @router.get("/applications/{client_id}/configuration", response_model=dict)
-async def public_application_configuration(
-    client_id: str, service: OAuthService = Depends(get_oauth_service)
-):
+async def public_application_configuration(client_id: str, service: OAuthService = Depends(get_oauth_service)):
     """
     Public application configuration for the hosted Identity UI.
 
@@ -220,9 +216,7 @@ async def public_application_configuration(
 
 
 @router.post("/password/reset")
-async def standalone_password_reset(
-    body: ResetPasswordRequest, service: OAuthService = Depends(get_oauth_service)
-):
+async def standalone_password_reset(body: ResetPasswordRequest, service: OAuthService = Depends(get_oauth_service)):
     """
     Standalone password reset used when the email link is opened outside an
     active authorization transaction.

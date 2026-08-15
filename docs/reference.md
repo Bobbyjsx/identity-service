@@ -75,8 +75,7 @@ Both require `X-Application-Id`.
 | `FIRESTORE_DATABASE` | `(default)` | Firestore database id. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `firebase-credentials.json` | Service-account file. Unused when the emulator is set via `FIRESTORE_EMULATOR_HOST`. |
 | `ADMIN_SECRET` | `changeme-in-prod` | Value of `X-Admin-Token`. |
-| `JWT_ISSUER` | `urn:identity-service` | `iss` on access and service tokens. |
-| `OIDC_ISSUER` | `http://localhost:8002` | `iss` on ID tokens and in discovery. |
+| `IDENTITY_ISSUER` | `http://localhost:8002` | Canonical `iss` on access, service, and ID tokens, and in OIDC discovery. |
 | `PRIVATE_KEY` | unset | PEM-encoded Ed25519 private key. Generated ephemerally in development if missing. |
 | `JWT_EXPIRATION_MINUTES` | `15` | Access, ID, and service token lifetime. |
 | `IDENTITY_UI_BASE_URL` | `http://localhost:3000` | Where `/authorize` sends the browser. |
@@ -98,6 +97,7 @@ Stored on the application document.
   "name": "Storefront",
   "description": "Customer accounts",
   "client_id": "app_…",
+  "client_type": "public",
   "status": "active",
   "branding": {
     "logo_url": "https://cdn.example.com/logo.png",
@@ -112,13 +112,22 @@ Stored on the application document.
   "oauth": {
     "redirect_uris": ["https://app.example.com/callback"],
     "allowed_scopes": ["openid", "profile", "email"],
-    "allowed_grants": ["authorization_code", "client_credentials"]
+    "allowed_grants": ["authorization_code"]
   }
 }
 ```
 
-Known scopes: `openid`, `profile`, `email`, `offline_access`.
-Known grants: `authorization_code`, `client_credentials`.
+Known scopes: `openid`, `profile`, `email`. `offline_access` is not
+supported. Refresh tokens are issued under this service's normal session
+policy, not that scope.
+
+Known grants: `authorization_code` (default), `client_credentials`
+(opt-in). Known client types: `public` (default), `confidential`.
+
+Existing applications without `client_type` are treated as `public`.
+Existing applications without `oauth.allowed_grants` receive
+`["authorization_code"]` only. If a deployed application relied on the
+old implicit `client_credentials` default, enable that grant explicitly.
 
 ## Errors
 
@@ -141,6 +150,8 @@ returned as a 302 to that URI with `error`, `error_description`, and
 | `invalid_scope` | 400 | A requested scope is not in `allowed_scopes`. |
 | `invalid_grant` | 400 | Code missing, expired, used, mismatched, PKCE failed, grant disabled, user gone. |
 | `unsupported_grant_type` | 400 | `grant_type` is not `authorization_code` or `client_credentials`. |
+| `unauthorized_client` | 400 | The requested grant is not enabled for this application. |
+| `server_error` | 500 | Unexpected infrastructure failure. No internal details. |
 | `invalid_transaction` | 404 | Unknown transaction id. |
 | `transaction_expired` | 400 | Transaction TTL elapsed. |
 | `transaction_completed` | 400 | Operation on a finished transaction. |
@@ -173,6 +184,28 @@ use FastAPI's usual `{"detail": "…"}` shape, not the OAuth error object.
 Expiry is enforced when a row is used. Stale documents are not deleted
 automatically. A periodic cleanup of rows with `expires_at` older than a
 day keeps collections bounded; correctness does not depend on it.
+
+Firestore TTL on `expires_at` for `oauth_transactions`,
+`authorization_codes`, `password_reset_tokens`, and
+`email_verification_tokens` is optional cleanup. TTL is not a security
+control. The service always checks `expires_at` itself.
+
+### Indexes
+
+Single-field equality queries are covered by Firestore's automatic
+indexes. Composite indexes required in production (the emulator is
+lenient) are declared in `firestore.indexes.json`:
+
+| Collection | Fields |
+| --- | --- |
+| `users` | `app_id` + `email` |
+| `roles` | `app_id` + `name` |
+| `permissions` | `app_id` + `name` |
+| `refresh_tokens` | `user_id` + `app_id` |
+
+Deploy with `gcloud firestore indexes composite create` from that file,
+or `firebase deploy --only firestore:indexes`. Do not assume the emulator
+has the same indexing requirements as production.
 
 ## Project layout
 

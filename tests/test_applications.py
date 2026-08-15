@@ -1,4 +1,3 @@
-
 import pytest
 from httpx import AsyncClient
 
@@ -38,9 +37,7 @@ async def test_application_config_defaults(async_client: AsyncClient):
     """
     app_data = await create_application(async_client)
 
-    resp = await async_client.get(
-        f"/api/v1/oauth/applications/{app_data['client_id']}/configuration"
-    )
+    resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
     assert resp.status_code == 200
     config = resp.json()
     assert config["name"] == app_data["name"]
@@ -48,6 +45,7 @@ async def test_application_config_defaults(async_client: AsyncClient):
     assert config["allow_password_login"] is True
     assert config["require_email_verification"] is False
     assert config["allowed_scopes"] == ["openid", "profile", "email"]
+    assert config.get("client_type") is None
     assert "client_secret" not in config
     assert "redirect_uris" not in config
     assert config["logo_url"] is None
@@ -77,9 +75,7 @@ async def test_application_config_persisted(async_client: AsyncClient):
         },
     )
 
-    resp = await async_client.get(
-        f"/api/v1/oauth/applications/{app_data['client_id']}/configuration"
-    )
+    resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
     config = resp.json()
     assert config["logo_url"] == "https://cdn.example.com/logo.png"
     assert config["primary_color"] == "#112233"
@@ -103,7 +99,11 @@ async def test_application_config_validation_rejects_dangerous_values(async_clie
         {"oauth": {"redirect_uris": ["https://example.com/cb#fragment"]}},
         {"oauth": {"redirect_uris": ["http://notlocalhost.example.com/cb"]}},
         {"oauth": {"allowed_scopes": ["admin:everything"]}},
+        {"oauth": {"allowed_scopes": ["offline_access"]}},
         {"oauth": {"allowed_grants": ["password"]}},
+        {"name": "<script>alert(1)</script>"},
+        {"description": "ok <img src=x onerror=alert(1)>"},
+        {"client_type": "trusted"},
     ]
     for case in cases:
         resp = await async_client.patch(
@@ -124,9 +124,7 @@ async def test_application_config_admin_required(async_client: AsyncClient):
             headers=headers,
         )
         assert resp.status_code in (403, 422), resp.text
-        config_resp = await async_client.get(
-            f"/api/v1/oauth/applications/{app_data['client_id']}/configuration"
-        )
+        config_resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
         assert config_resp.json()["primary_color"] is None
 
 

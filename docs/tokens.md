@@ -5,16 +5,20 @@ Use the access token to call APIs, the refresh token to get a new access
 token, the ID token to know who signed in, and the service token for
 machine-to-machine calls.
 
-All JWTs are Ed25519 (`EdDSA`). Public keys are at
-`GET /.well-known/jwks.json`.
+All JWTs are Ed25519 (`EdDSA`), signed with the same key ring. Public
+keys are at `GET /.well-known/jwks.json`. Every JWT — user access,
+service, and ID token — uses one issuer: `IDENTITY_ISSUER` (default
+`http://localhost:8002`). That value is also `issuer` in
+`/.well-known/openid-configuration`.
 
-## Which token to use
+## Which credential to use
 
-| Token | Shape | Lifetime | Audience | Use it for |
+| Credential | Shape | Lifetime | Audience | Use it for |
 | --- | --- | --- | --- | --- |
+| Authorization code | Opaque `code_…` | 5 minutes, single-use | — | Server-side exchange at `/oauth/token` only. Never an API credential. |
 | Access token | JWT, `type: user` | 15 minutes | `application_api` | `Authorization: Bearer` on your APIs |
 | Refresh token | Opaque 48-byte string | 7 days, rotated | — | `POST /api/v1/auth/refresh` |
-| ID token | JWT | 15 minutes | your `client_id` | Identify the user in your application |
+| ID token | JWT | 15 minutes | your `client_id` | Identify the user in your application. Not an API access token. |
 | Service token | JWT, `type: service` | 15 minutes | the audience you requested | App-to-app calls, no user |
 
 Access-token lifetime is `JWT_EXPIRATION_MINUTES` (default 15).
@@ -25,7 +29,7 @@ Issued by direct login, OAuth token exchange, and refresh.
 
 ```json
 {
-  "iss": "urn:identity-service",
+  "iss": "http://localhost:8002",
   "sub": "<user id>",
   "aud": "application_api",
   "app_id": "<client_id>",
@@ -41,8 +45,8 @@ Issued by direct login, OAuth token exchange, and refresh.
 `scope` is present on tokens from the OAuth path. Direct login does not
 set it. `roles` are the role names stored on the user at issue time.
 
-`iss` is `JWT_ISSUER` (default `urn:identity-service`). This is *not* the
-same issuer as the ID token.
+`iss` is `IDENTITY_ISSUER`. The ID token uses the same issuer. They are
+distinguished by `aud` and by purpose, not by who signed them.
 
 ## Refresh token
 
@@ -73,9 +77,10 @@ Issued only by `POST /api/v1/oauth/token` when the granted scopes include
 }
 ```
 
-`iss` is `OIDC_ISSUER`, not `JWT_ISSUER`. `aud` is your `client_id`, not
+`iss` is `IDENTITY_ISSUER`. `aud` is your `client_id`, not
 `application_api`. That is deliberate: a resource server that accepts
-`application_api` must reject this token.
+`application_api` must reject this token. An ID token is identity for
+the client, not authorization for an API.
 
 Claims are gated by scope:
 
@@ -96,7 +101,7 @@ Issued by `grant_type=client_credentials` at `/api/v1/oauth/token`.
 
 ```json
 {
-  "iss": "urn:identity-service",
+  "iss": "http://localhost:8002",
   "sub": "service:<application document id>",
   "aud": "<the audience you requested>",
   "app_id": "<application document id>",
@@ -120,7 +125,7 @@ Other services do not call Identity Service per request.
 1. Fetch `GET /.well-known/jwks.json` and cache it. The keys are Ed25519
    (`kty: OKP`, `crv: Ed25519`).
 2. Read the JWT header `kid` and pick that key.
-3. Verify the EdDSA signature, `iss` (`urn:identity-service` by default),
+3. Verify the EdDSA signature, `iss` (`IDENTITY_ISSUER`),
    `aud` (`application_api` for user tokens), and `exp`.
 4. Trust `sub` as the user id and `app_id` as the application the user
    belongs to.

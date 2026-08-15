@@ -53,6 +53,7 @@ ENVIRONMENT=development
 FIRESTORE_DATABASE=identity-service
 GOOGLE_APPLICATION_CREDENTIALS=firebase-credentials.json
 ADMIN_SECRET=changeme-in-prod
+IDENTITY_ISSUER=http://localhost:8002
 JWT_EXPIRATION_MINUTES=15
 
 # PEM-encoded Ed25519 private key. If omitted in development, the process
@@ -61,7 +62,6 @@ PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n..."
 
 IDENTITY_UI_BASE_URL=http://localhost:3000
 PUBLIC_BASE_URL=http://localhost:8002
-OIDC_ISSUER=http://localhost:8002
 ```
 
 The full list of settings is in [Reference](docs/reference.md#environment).
