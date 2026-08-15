@@ -1,4 +1,5 @@
 import secrets
+from typing import Any
 
 from fastapi import HTTPException
 
@@ -15,6 +16,39 @@ from app.schemas.application import (
 )
 from app.schemas.enums import StatusEnum
 
+DEFAULT_ALLOWED_SCOPES = ["openid", "profile", "email"]
+DEFAULT_ALLOWED_GRANTS = ["authorization_code", "client_credentials"]
+
+
+def get_app_branding(app: dict[str, Any]) -> dict:
+    """Returns application branding with backwards-compatible defaults."""
+    branding = app.get("branding") or {}
+    return {
+        "logo_url": branding.get("logo_url"),
+        "primary_color": branding.get("primary_color"),
+        "secondary_color": branding.get("secondary_color"),
+    }
+
+
+def get_app_authentication_config(app: dict[str, Any]) -> dict:
+    """Returns application authentication configuration with backwards-compatible defaults."""
+    auth_config = app.get("authentication") or {}
+    return {
+        "allow_signup": auth_config.get("allow_signup", True),
+        "allow_password_login": auth_config.get("allow_password_login", True),
+        "require_email_verification": auth_config.get("require_email_verification", False),
+    }
+
+
+def get_app_oauth_config(app: dict[str, Any]) -> dict:
+    """Returns application OAuth configuration with backwards-compatible defaults."""
+    oauth = app.get("oauth") or {}
+    return {
+        "redirect_uris": oauth.get("redirect_uris", []),
+        "allowed_scopes": oauth.get("allowed_scopes", DEFAULT_ALLOWED_SCOPES),
+        "allowed_grants": oauth.get("allowed_grants", DEFAULT_ALLOWED_GRANTS),
+    }
+
 
 class ApplicationService:
     def __init__(self, app_repo: ApplicationRepository, cred_repo: ApplicationCredentialRepository):
@@ -28,20 +62,56 @@ class ApplicationService:
         """
         Registers a new application and generates a client ID and secret.
         """
-        app_data = ApplicationModel(name=app_in.name, description=app_in.description).model_dump()
+        app_data = ApplicationModel(name=app_in.name, description=app_in.description).model_dump(mode="json")
         created_app = await self.app_repo.create(app_data)
-        
+
         # Generate client secret
         client_secret = secrets.token_urlsafe(32)
         hashed_secret = get_password_hash(client_secret)
-        
+
         cred_data = ApplicationCredentialModel(app_id=created_app["id"], hashed_secret=hashed_secret).model_dump()
         await self.cred_repo.create(cred_data)
-        
+
         return ApplicationCredentials(
             client_id=created_app["client_id"],
             client_secret=client_secret  # Only shown once
         )
+
+    async def get_application_by_client_id(self, client_id: str) -> dict[str, Any] | None:
+        """
+        Retrieves an application document by client_id.
+        """
+        return await self.app_repo.get_by_client_id(client_id)
+
+    async def update_application_config(
+        self, client_id: str, updates: dict[str, Any]
+    ) -> dict[str, Any]:
+        """
+        Applies a partial (merge) configuration update to an application document.
+
+        Only known configuration namespaces are touched; existing values are
+        preserved for fields that were not supplied.
+        """
+        app = await self.app_repo.get_by_client_id(client_id)
+        if not app:
+            raise HTTPException(status_code=404, detail="Application not found")
+
+        doc_ref = self.app_repo.collection.document(app["id"])
+
+        patch: dict[str, Any] = {}
+        for namespace in ("branding", "authentication", "oauth"):
+            incoming = (updates or {}).get(namespace)
+            if incoming is not None:
+                merged = dict(app.get(namespace) or {})
+                merged.update(incoming)
+                patch[namespace] = merged
+        for field in ("name", "description"):
+            if (updates or {}).get(field) is not None:
+                patch[field] = updates[field]
+
+        if patch:
+            await doc_ref.update(patch)
+        return await self.app_repo.get(client_id) or app
 
     async def verify_client_credentials(self, client_id: str, client_secret: str) -> str:
         """
@@ -50,10 +120,10 @@ class ApplicationService:
         app = await self.app_repo.get_by_client_id(client_id)
         if not app:
             raise HTTPException(status_code=401, detail="Invalid client credentials")
-            
+
         creds = await self.cred_repo.get_by_field("app_id", app["id"])
         for cred in creds:
             if cred.get("status") == StatusEnum.ACTIVE.value and verify_password(client_secret, cred["hashed_secret"]):
                 return app["id"]
-                
+
         raise HTTPException(status_code=401, detail="Invalid client credentials")

@@ -5,12 +5,17 @@ from google.cloud.firestore import AsyncClient
 from app.core.config import settings
 from app.core.database import get_db
 from app.repositories.application import ApplicationCredentialRepository, ApplicationRepository
+from app.repositories.authorization_code import AuthorizationCodeRepository
+from app.repositories.oauth_transaction import OAuthTransactionRepository
 from app.repositories.permission import PermissionRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.role import RoleRepository
+from app.repositories.token import OpaqueTokenRepository
 from app.repositories.user import UserRepository
 from app.services.application import ApplicationService
 from app.services.auth import AuthService
+from app.services.notifications import LoggingNotificationService
+from app.services.oauth import OAuthService
 from app.services.rbac import RBACService
 
 security = HTTPBearer()
@@ -20,6 +25,19 @@ def get_auth_service(db: AsyncClient = Depends(get_db)) -> AuthService:
 
 def get_app_service(db: AsyncClient = Depends(get_db)) -> ApplicationService:
     return ApplicationService(ApplicationRepository(db), ApplicationCredentialRepository(db))
+
+def get_oauth_service(db: AsyncClient = Depends(get_db)) -> OAuthService:
+    return OAuthService(
+        app_repo=ApplicationRepository(db),
+        app_service=ApplicationService(ApplicationRepository(db), ApplicationCredentialRepository(db)),
+        auth_service=AuthService(UserRepository(db), RefreshTokenRepository(db), ApplicationRepository(db)),
+        user_repo=UserRepository(db),
+        tx_repo=OAuthTransactionRepository(db),
+        code_repo=AuthorizationCodeRepository(db),
+        reset_token_repo=OpaqueTokenRepository(db, "password_reset_tokens"),
+        verification_token_repo=OpaqueTokenRepository(db, "email_verification_tokens"),
+        notifications=LoggingNotificationService(),
+    )
 
 def get_rbac_service(db: AsyncClient = Depends(get_db)) -> RBACService:
     return RBACService(RoleRepository(db), PermissionRepository(db))
