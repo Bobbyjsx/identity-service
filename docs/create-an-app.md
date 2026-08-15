@@ -17,8 +17,19 @@ Assume the service is running at `http://localhost:8002` and
 curl -s http://localhost:8002/api/v1/applications \
   -H "X-Admin-Token: $ADMIN_SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"name":"Storefront","description":"Customer accounts"}'
+  -d '{
+    "name": "Storefront",
+    "description": "Customer accounts",
+    "client_type": "confidential",
+    "oauth": {
+      "redirect_uris": ["https://app.example.com/callback"]
+    }
+  }'
 ```
+
+`name` is the only required field. `client_type`, branding, authentication,
+and OAuth settings can be sent on create so provisioning is one request,
+or patched later. Existing callers that send only `name` still work.
 
 ```json
 {
@@ -53,7 +64,7 @@ curl -s -X PATCH \
     "oauth": {
       "redirect_uris": ["https://app.example.com/callback"],
       "allowed_scopes": ["openid", "profile", "email"],
-      "allowed_grants": ["authorization_code", "client_credentials"]
+      "allowed_grants": ["authorization_code"]
     }
   }'
 ```
@@ -69,9 +80,10 @@ change.
 
 Defaults if you never PATCH:
 
+- `client_type` is `public`
 - signup and password login allowed, email verification off
 - allowed scopes `openid profile email`
-- allowed grants `authorization_code` and `client_credentials`
+- allowed grants `authorization_code` only — machine-to-machine is opt-in
 - **no redirect URIs** — OAuth cannot start until you register at least one
 
 Redirect URIs are matched as exact strings. `https` is required, except
@@ -136,7 +148,13 @@ That sequence, including what each party holds at each step, is
 ## 4. Machine-to-machine (no user)
 
 Services that act as the application, not as a person, use client
-credentials.
+credentials. This grant is **off by default**. Enable it on the
+application first:
+
+```json
+{ "oauth": { "allowed_grants": ["authorization_code", "client_credentials"] } }
+```
+
 
 ```bash
 curl -s http://localhost:8002/api/v1/oauth/token \

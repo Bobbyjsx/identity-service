@@ -142,7 +142,7 @@ class KeyManager:
 
         aud = audience if audience is not None else ["application_api", "target-service"]
 
-        return jwt.decode(token, self.public_key, algorithms=["EdDSA"], audience=aud, issuer=settings.jwt_issuer)
+        return jwt.decode(token, self.public_key, algorithms=["EdDSA"], audience=aud, issuer=settings.identity_issuer)
 
 
 key_manager = KeyManager()

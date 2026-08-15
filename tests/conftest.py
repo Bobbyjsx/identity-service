@@ -15,6 +15,9 @@ os.environ["GOOGLE_CLOUD_PROJECT"] = "test-project"
 os.environ["IDENTITY_ENVIRONMENT"] = "development"
 
 REDIRECT_URI = "https://app.example.com/callback"
+CLIENT_CREDENTIALS_OAUTH = {
+    "allowed_grants": ["authorization_code", "client_credentials"],
+}
 
 
 def pkce_pair(verifier: str | None = None) -> tuple[str, str]:
@@ -51,30 +54,28 @@ async def create_application(
     async_client: AsyncClient,
     name: str | None = None,
     config: dict | None = None,
+    client_type: str | None = None,
 ) -> dict:
     """
-    Creates an application via the admin API and optionally patches its
-    hosted-login configuration. Returns the full application document
-    (fetched via the admin detail endpoint) merged with credentials.
+    Creates an application via the admin API. Optional branding, auth,
+    OAuth, and client_type are sent on the create request so provisioning
+    is atomic. Returns the full application document merged with credentials.
     """
     from app.core.config import settings
 
     app_name = name or f"Test App {uuid.uuid4().hex[:8]}"
+    body: dict = {"name": app_name}
+    if client_type:
+        body["client_type"] = client_type
+    if config:
+        body.update(config)
     app_resp = await async_client.post(
         "/api/v1/applications",
-        json={"name": app_name},
+        json=body,
         headers={"x-admin-token": settings.admin_secret},
     )
     assert app_resp.status_code == 200, app_resp.text
     data = app_resp.json()
-
-    if config:
-        patch_resp = await async_client.patch(
-            f"/api/v1/applications/{data['client_id']}/configuration",
-            json=config,
-            headers={"x-admin-token": settings.admin_secret},
-        )
-        assert patch_resp.status_code == 200, patch_resp.text
 
     detail_resp = await async_client.get(
         f"/api/v1/applications/{data['client_id']}/configuration",

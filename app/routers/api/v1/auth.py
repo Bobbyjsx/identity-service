@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, Form, Header, HTTPException
 
+from app.core.errors import OAuthError
 from app.dependencies import get_app_service, get_auth_service, get_current_user
 from app.schemas.auth import RefreshTokenRequest, Token
 from app.schemas.user import UserCreate, UserResponse
-from app.services.application import ApplicationService
+from app.services.application import ApplicationService, get_app_oauth_config
 from app.services.auth import AuthService
 
 router = APIRouter()
@@ -52,6 +53,10 @@ async def oauth_token(
     """
     if grant_type != "client_credentials":
         raise HTTPException(status_code=400, detail="Unsupported grant type")
+
+    app = await app_service.get_application_by_client_id(client_id)
+    if not app or "client_credentials" not in get_app_oauth_config(app)["allowed_grants"]:
+        raise OAuthError("unauthorized_client", "The client_credentials grant is not enabled for this application")
 
     app_id = await app_service.verify_client_credentials(client_id, client_secret)
     return auth_service.generate_service_token(app_id, audience=audience)

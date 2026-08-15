@@ -22,12 +22,8 @@ async def test_cross_application_transaction_isolation(async_client: AsyncClient
     Application A cannot use an authorization transaction created for
     application B, and vice versa.
     """
-    app_a = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
-    app_b = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_a = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
+    app_b = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_a, _, _ = await authorize_and_get_transaction(async_client, app_a["client_id"])
 
     email = f"user-{uuid.uuid4().hex[:8]}@example.com"
@@ -62,12 +58,8 @@ async def test_cross_application_code_redemption_impossible(async_client: AsyncC
     A code issued for app A can never be redeemed by app B because the code
     is bound to the client_id, application, transaction, and user.
     """
-    app_a = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
-    app_b = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_a = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
+    app_b = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_a, verifier, _ = await authorize_and_get_transaction(async_client, app_a["client_id"])
     email = f"user-{uuid.uuid4().hex[:8]}@example.com"
     await async_client.post(
@@ -101,9 +93,7 @@ async def test_cross_application_configuration_isolation(async_client: AsyncClie
             "branding": {"primary_color": "#111111"},
         },
     )
-    app_b = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_b = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     config_b = (await async_client.get(f"/api/v1/oauth/applications/{app_b['client_id']}/configuration")).json()
     assert config_b["primary_color"] is None
     assert config_b["primary_color"] != "#111111"
@@ -115,9 +105,7 @@ async def test_redirect_uri_manipulation_at_exchange(async_client: AsyncClient):
     The redirect URI used at the token endpoint must exactly match the one
     registered and used during the authorization request.
     """
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, verifier, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     email = f"user-{uuid.uuid4().hex[:8]}@example.com"
     await async_client.post(
@@ -149,9 +137,7 @@ async def test_redirect_uri_manipulation_at_exchange(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_authorize_rejects_unregistered_domain(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     resp = await async_client.get(
         "/api/v1/oauth/authorize",
         params={
@@ -170,9 +156,7 @@ async def test_authorize_rejects_unregistered_domain(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_authorize_rejects_javascript_uri(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     resp = await async_client.get(
         "/api/v1/oauth/authorize",
         params={
@@ -190,9 +174,7 @@ async def test_authorize_rejects_javascript_uri(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_transaction_id_is_opaque_and_high_entropy(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     seen = set()
     for _ in range(5):
         tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
@@ -204,9 +186,7 @@ async def test_transaction_id_is_opaque_and_high_entropy(async_client: AsyncClie
 
 @pytest.mark.asyncio
 async def test_id_token_audience_is_client(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, verifier, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     email = f"user-{uuid.uuid4().hex[:8]}@example.com"
     await async_client.post(
@@ -238,9 +218,7 @@ async def test_id_token_audience_is_client(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_id_token_signature_verifies_with_jwks(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, verifier, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     email = f"user-{uuid.uuid4().hex[:8]}@example.com"
     await async_client.post(
@@ -273,7 +251,7 @@ async def test_id_token_signature_verifies_with_jwks(async_client: AsyncClient):
         key,
         algorithms=["EdDSA"],
         audience=app_data["client_id"],
-        issuer=settings.oidc_issuer,
+        issuer=settings.identity_issuer,
     )
     assert payload["sub"]
 
@@ -293,13 +271,19 @@ async def test_oidc_discovery_document(async_client: AsyncClient):
     resp = await async_client.get("/.well-known/openid-configuration")
     assert resp.status_code == 200
     doc = resp.json()
-    assert doc["issuer"] == settings.oidc_issuer
+    assert doc["issuer"] == settings.identity_issuer
     assert doc["authorization_endpoint"] == f"{settings.public_base_url}/api/v1/oauth/authorize"
     assert doc["token_endpoint"] == f"{settings.public_base_url}/api/v1/oauth/token"
     assert doc["response_types_supported"] == ["code"]
     assert "authorization_code" in doc["grant_types_supported"]
     assert "client_credentials" in doc["grant_types_supported"]
     assert doc["code_challenge_methods_supported"] == ["S256"]
+    assert "offline_access" not in doc["scopes_supported"]
+    assert set(doc["scopes_supported"]) == {"openid", "profile", "email"}
+    assert "iss" in doc["claims_supported"]
+    assert "nonce" in doc["claims_supported"]
+    assert "token" not in doc["response_types_supported"]
+    assert "plain" not in doc["code_challenge_methods_supported"]
 
 
 @pytest.mark.asyncio
@@ -313,7 +297,7 @@ async def test_invalid_signature_rejected_by_api(async_client: AsyncClient):
     other_key = ed25519.Ed25519PrivateKey.generate()
     bogus = jwt.encode(
         {
-            "iss": settings.jwt_issuer,
+            "iss": settings.identity_issuer,
             "sub": "user_x",
             "aud": "application_api",
             "app_id": "app_x",
@@ -322,15 +306,16 @@ async def test_invalid_signature_rejected_by_api(async_client: AsyncClient):
         other_key,
         algorithm="EdDSA",
     )
-    resp = await async_client.get(
-        "/api/v1/auth/me", headers={"Authorization": f"Bearer {bogus}"}
-    )
+    resp = await async_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {bogus}"})
     assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_incorrect_audience_rejected(async_client: AsyncClient):
-    app_data = await create_application(async_client)
+    app_data = await create_application(
+        async_client,
+        config={"oauth": {"allowed_grants": ["authorization_code", "client_credentials"]}},
+    )
     resp = await async_client.post(
         "/api/v1/oauth/token",
         data={
@@ -357,15 +342,13 @@ async def test_error_responses_do_not_leak_stack_traces(async_client: AsyncClien
     resp = await async_client.get("/api/v1/oauth/transactions/tx_nonexistent")
     body = resp.text
     assert "Traceback" not in body
-    assert "File \"" not in body
+    assert 'File "' not in body
     assert resp.json()["error"] == "invalid_transaction"
 
 
 @pytest.mark.asyncio
 async def test_raw_authorization_code_never_persisted(async_client: AsyncClient, db):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     email = f"user-{uuid.uuid4().hex[:8]}@example.com"
     await async_client.post(
@@ -376,10 +359,7 @@ async def test_raw_authorization_code_never_persisted(async_client: AsyncClient,
     code = await login_and_get_code(async_client, tx_id, email, "password123")
 
     docs = [
-        d.to_dict()
-        async for d in db.collection("authorization_codes")
-        .where("transaction_id", "==", tx_id)
-        .stream()
+        d.to_dict() async for d in db.collection("authorization_codes").where("transaction_id", "==", tx_id).stream()
     ]
     assert len(docs) == 1
     stored = docs[0]
@@ -393,9 +373,7 @@ async def test_transaction_secrets_not_exposed_in_documents(async_client: AsyncC
     The hosted UI must not be able to extract client secrets or challenges
     from transaction-related responses.
     """
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
 
     resp = await async_client.get(f"/api/v1/oauth/transactions/{tx_id}")
@@ -403,9 +381,7 @@ async def test_transaction_secrets_not_exposed_in_documents(async_client: AsyncC
     for secret in ("code_challenge", "client_secret", "nonce", "state", "hashed_secret"):
         assert secret not in body
 
-    config_resp = await async_client.get(
-        f"/api/v1/oauth/applications/{app_data['client_id']}/configuration"
-    )
+    config_resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
     body = config_resp.text
     for secret in ("client_secret", "hashed_secret", "redirect_uris"):
         assert secret not in body
@@ -413,9 +389,7 @@ async def test_transaction_secrets_not_exposed_in_documents(async_client: AsyncC
 
 @pytest.mark.asyncio
 async def test_callback_redirect_contains_only_code_and_state(async_client: AsyncClient):
-    app_data = await create_application(
-        async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
-    )
+    app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     email = f"user-{uuid.uuid4().hex[:8]}@example.com"
     await async_client.post(

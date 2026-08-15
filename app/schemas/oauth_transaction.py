@@ -13,6 +13,28 @@ class OAuthTransactionStatus(str, Enum):
     EXPIRED = "expired"
 
 
+# Stored-state transitions only. `expired` is derived at read time from expires_at
+# and is never a legal source or target of a written transition.
+VALID_TRANSITIONS: dict[str, frozenset[str]] = {
+    OAuthTransactionStatus.PENDING.value: frozenset(
+        {
+            OAuthTransactionStatus.AUTHENTICATED.value,
+            OAuthTransactionStatus.COMPLETED.value,
+            OAuthTransactionStatus.CANCELLED.value,
+        }
+    ),
+    OAuthTransactionStatus.AUTHENTICATED.value: frozenset(
+        {
+            OAuthTransactionStatus.COMPLETED.value,
+            OAuthTransactionStatus.CANCELLED.value,
+        }
+    ),
+    OAuthTransactionStatus.COMPLETED.value: frozenset(),
+    OAuthTransactionStatus.CANCELLED.value: frozenset(),
+    OAuthTransactionStatus.EXPIRED.value: frozenset(),
+}
+
+
 def generate_transaction_id() -> str:
     """
     Generates a high-entropy opaque transaction identifier.
@@ -37,11 +59,7 @@ class OAuthTransactionModel(BaseModel):
     status: OAuthTransactionStatus = OAuthTransactionStatus.PENDING
     user_id: str | None = None
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    expires_at: str = Field(
-        default_factory=lambda: (
-            datetime.now(timezone.utc) + timedelta(minutes=10)
-        ).isoformat()
-    )
+    expires_at: str = Field(default_factory=lambda: (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat())
     completed_at: str | None = None
 
     model_config = ConfigDict(use_enum_values=True)

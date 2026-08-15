@@ -16,6 +16,7 @@ from app.repositories.oauth_transaction import OAuthTransactionRepository
 from app.repositories.token import OpaqueTokenRepository
 from app.repositories.user import UserRepository
 from app.schemas.application import (
+    KNOWN_OAUTH_SCOPES,
     PublicApplicationConfig,
 )
 from app.schemas.authorization_code import (
@@ -30,6 +31,7 @@ from app.schemas.user import UserCreate
 from app.services.application import (
     get_app_authentication_config,
     get_app_branding,
+    get_app_client_type,
     get_app_oauth_config,
 )
 from app.services.auth import AuthService
@@ -131,12 +133,20 @@ class OAuthService:
 
     def validate_scopes(self, app: dict[str, Any], scopes: list[str]):
         oauth_config = get_app_oauth_config(app)
-        allowed = set(oauth_config["allowed_scopes"])
+        allowed = set(oauth_config["allowed_scopes"]) & KNOWN_OAUTH_SCOPES
         invalid = [s for s in scopes if s not in allowed]
         if invalid:
             raise OAuthError(
                 "invalid_scope",
                 f"Requested scopes not allowed for this application: {', '.join(invalid)}",
+            )
+
+    def validate_grant_allowed(self, app: dict[str, Any], grant: str):
+        oauth_config = get_app_oauth_config(app)
+        if grant not in oauth_config["allowed_grants"]:
+            raise OAuthError(
+                "unauthorized_client",
+                f"The {grant} grant is not enabled for this application",
             )
 
     async def create_transaction(self, req: AuthorizationRequest) -> OAuthTransactionModel:
@@ -146,6 +156,7 @@ class OAuthService:
         app = await self.resolve_client(req.client_id)
         self.validate_redirect(app, req.redirect_uri)
         self.validate_response_type(req.response_type)
+        self.validate_grant_allowed(app, "authorization_code")
 
         scopes = [s for s in (req.scope or "").split(" ") if s]
         self.validate_scopes(app, scopes)
@@ -169,9 +180,7 @@ class OAuthService:
     def build_identity_ui_redirect(self, transaction_id: str) -> str:
         return f"{settings.identity_ui_base_url}/authorize?transaction_id={transaction_id}"
 
-    def build_error_redirect(
-        self, redirect_uri: str, state: str | None, error: str, error_description: str
-    ) -> str:
+    def build_error_redirect(self, redirect_uri: str, state: str | None, error: str, error_description: str) -> str:
         params = {"error": error, "error_description": error_description}
         if state is not None:
             params["state"] = state
@@ -238,9 +247,19 @@ class OAuthService:
         tx = await self.tx_repo.get(transaction_id)
         if not tx:
             raise OAuthError("invalid_transaction", "Transaction not found", status_code=404)
-        if self.effective_status(tx) == "expired":
+        status = self.effective_status(tx)
+        if status == "expired":
             raise OAuthError("transaction_expired", "Transaction has expired")
-        await self.tx_repo.collection.document(tx["id"]).update({"status": "cancelled"})
+        if status not in {"pending", "authenticated"}:
+            raise OAuthError(
+                TRANSACTION_STATUS_ERRORS.get(status, "invalid_transaction_state"),
+                f"Transaction is already {status}",
+            )
+        await self.tx_repo.claim_transaction(
+            transaction_id,
+            expected_status={status},
+            new_status="cancelled",
+        )
         return {"transaction_id": transaction_id, "status": "cancelled"}
 
     async def _load_transaction_for_operation(
@@ -266,9 +285,7 @@ class OAuthService:
                 "The user must verify their email before continuing",
             )
         if status not in allowed_statuses:
-            raise OAuthError(
-                "invalid_transaction_state", "Operation not allowed in the current transaction state"
-            )
+            raise OAuthError("invalid_transaction_state", "Operation not allowed in the current transaction state")
 
         app = await self.app_repo.get(tx.get("application_id", ""))
         if not app or app.get("status") != ACTIVE_STATUS:
@@ -282,9 +299,7 @@ class OAuthService:
     def _require_password_login(self, app: dict[str, Any]):
         auth_config = get_app_authentication_config(app)
         if not auth_config["allow_password_login"]:
-            raise OAuthError(
-                "password_login_disabled", "Password login is disabled for this application"
-            )
+            raise OAuthError("password_login_disabled", "Password login is disabled for this application")
 
     async def login(self, transaction_id: str, email: str, password: str) -> dict[str, Any]:
         """
@@ -339,19 +354,22 @@ class OAuthService:
         """
         Finishes the transaction-side of authentication.
 
-        If the application requires email verification and the user is not
-        verified, the transaction moves to `authenticated` and waits for
-        verification. Otherwise an authorization code is issued immediately.
+        The pending → authenticated claim is atomic: only one concurrent
+        login/signup can progress the transaction. Authorization codes are
+        issued only after that claim succeeds.
         """
         auth_config = get_app_authentication_config(app)
         if auth_config["require_email_verification"] and not user.get("email_verified", False):
-            await self.tx_repo.collection.document(tx["id"]).update(
-                {"status": "authenticated", "user_id": user["id"]}
+            claimed = await self.tx_repo.claim_transaction(
+                tx["id"],
+                expected_status="pending",
+                new_status="authenticated",
+                updates={"user_id": user["id"]},
             )
-            await self._issue_verification_token(tx, app, user)
+            await self._issue_verification_token(claimed, app, user)
             return {"redirect_url": None, "email_verification_required": True}
 
-        raw_code = await self.issue_authorization_code(tx, app, user)
+        raw_code = await self.issue_authorization_code(tx, app, user, expected_status="pending")
         return {"redirect_url": self._build_callback_url(tx, raw_code), "email_verification_required": False}
 
     async def verify_email(self, transaction_id: str, verification_token: str) -> dict[str, Any]:
@@ -359,17 +377,11 @@ class OAuthService:
         Verifies a user's email for a transaction awaiting verification,
         then issues the authorization code.
         """
-        tx, app = await self._load_transaction_for_operation(
-            transaction_id, {"pending", "authenticated"}
-        )
+        tx, app = await self._load_transaction_for_operation(transaction_id, {"pending", "authenticated"})
         if not tx.get("user_id"):
-            raise OAuthError(
-                "invalid_transaction_state", "No user is associated with this transaction"
-            )
+            raise OAuthError("invalid_transaction_state", "No user is associated with this transaction")
 
-        token = await self.verification_token_repo.get_by_token_hash(
-            hash_token(verification_token)
-        )
+        token = await self.verification_token_repo.get_by_token_hash(hash_token(verification_token))
         if not token:
             raise OAuthError("invalid_verification_token", "Verification token is invalid")
         if token.get("app_id") != tx["client_id"] or token.get("user_id") != tx["user_id"]:
@@ -398,10 +410,7 @@ class OAuthService:
             expires_at=(_now() + timedelta(minutes=30)).isoformat(),
         )
         await self.verification_token_repo.create(token.model_dump(), id=token.id)
-        verify_url = (
-            f"{settings.identity_ui_base_url}/verify-email"
-            f"?transaction_id={tx['id']}&token={raw_token}"
-        )
+        verify_url = f"{settings.identity_ui_base_url}/verify-email?transaction_id={tx['id']}&token={raw_token}"
         await self.notifications.send_verification_email(
             to=user["email"], verify_url=verify_url, app_name=app.get("name", "Application")
         )
@@ -426,9 +435,7 @@ class OAuthService:
                 token_hash=hash_token(raw_token),
                 app_id=tx["client_id"],
                 user_id=user["id"],
-                expires_at=(
-                    _now() + timedelta(minutes=settings.password_reset_token_expiration_minutes)
-                ).isoformat(),
+                expires_at=(_now() + timedelta(minutes=settings.password_reset_token_expiration_minutes)).isoformat(),
             )
             await self.reset_token_repo.create(token.model_dump(), id=token.id)
             reset_url = f"{settings.identity_ui_base_url}/reset-password?token={raw_token}"
@@ -466,9 +473,7 @@ class OAuthService:
         await self.reset_token_repo.mark_used(token["id"], _now_iso())
         await self.auth_service.refresh_token_repo.revoke_user_tokens(user["id"], user["app_id"])
 
-    async def reset_password(
-        self, transaction_id: str, reset_token: str, new_password: str
-    ) -> dict[str, Any]:
+    async def reset_password(self, transaction_id: str, reset_token: str, new_password: str) -> dict[str, Any]:
         """
         Transaction-bound password reset. The transaction provides application
         context; the reset token carries its own independent lifecycle.
@@ -476,9 +481,7 @@ class OAuthService:
         tx, _ = await self._load_transaction_for_operation(transaction_id, {"pending"})
         token, user = await self._load_reset_token(reset_token)
         if token["app_id"] != tx["client_id"]:
-            raise OAuthError(
-                "invalid_reset_token", "Password reset token does not match this transaction"
-            )
+            raise OAuthError("invalid_reset_token", "Password reset token does not match this transaction")
         await self._apply_password_reset(token, user, new_password)
         return {"detail": "Password has been reset. You can now sign in."}
 
@@ -496,7 +499,11 @@ class OAuthService:
     # ------------------------------------------------------------------
 
     async def issue_authorization_code(
-        self, tx: dict[str, Any], app: dict[str, Any], user: dict[str, Any]
+        self,
+        tx: dict[str, Any],
+        app: dict[str, Any],
+        user: dict[str, Any],
+        expected_status: str = "authenticated",
     ) -> str:
         """
         Creates a short-lived, single-use authorization code bound to the
@@ -515,14 +522,19 @@ class OAuthService:
             code_challenge=tx["code_challenge"],
             code_challenge_method=tx.get("code_challenge_method", "S256"),
             nonce=tx.get("nonce"),
-            expires_at=(
-                _now() + timedelta(minutes=settings.oauth_authorization_code_expiration_minutes)
-            ).isoformat(),
+            expires_at=(_now() + timedelta(minutes=settings.oauth_authorization_code_expiration_minutes)).isoformat(),
         )
-        await self.code_repo.create(code.model_dump(), id=code.id)
-
-        await self.tx_repo.collection.document(tx["id"]).update(
-            {"status": "completed", "user_id": user["id"], "completed_at": _now_iso()}
+        await self.tx_repo.complete_with_code(
+            transaction_id=tx["id"],
+            expected_status=expected_status,
+            tx_updates={
+                "status": "completed",
+                "user_id": user["id"],
+                "completed_at": _now_iso(),
+            },
+            code_collection=self.code_repo.collection,
+            code_id=code.id,
+            code_data=code.model_dump(),
         )
         return raw_code
 
@@ -572,8 +584,11 @@ class OAuthService:
 
         oauth_config = get_app_oauth_config(app)
         if "authorization_code" not in oauth_config["allowed_grants"]:
-            raise OAuthError("invalid_grant", "The authorization code grant is not enabled for this application")
+            raise OAuthError("unauthorized_client", "The authorization code grant is not enabled for this application")
 
+        client_type = get_app_client_type(app)
+        if client_type == "confidential" and not client_secret:
+            raise OAuthError("invalid_client", "client_secret is required for confidential clients", status_code=401)
         if client_secret:
             try:
                 await self.app_service.verify_client_credentials(client_id, client_secret)
@@ -597,9 +612,14 @@ class OAuthService:
             raise OAuthError("invalid_grant", "User no longer exists")
 
         used_at = _now_iso()
-        redeemed = await self.code_repo.mark_used_atomic(
-            code_doc["id"], code_doc["code_hash"], "active", used_at
-        )
+        try:
+            redeemed = await self.code_repo.mark_used_atomic(code_doc["id"], code_doc["code_hash"], "active", used_at)
+        except Exception as exc:
+            raise OAuthError(
+                "server_error",
+                "An unexpected error occurred",
+                status_code=500,
+            ) from exc
         if not redeemed:
             raise OAuthError("invalid_grant", "Authorization code has already been used")
 
@@ -621,7 +641,7 @@ class OAuthService:
         now = _now()
         exp = now + timedelta(minutes=settings.jwt_expiration_minutes)
         claims: dict[str, Any] = {
-            "iss": settings.oidc_issuer,
+            "iss": settings.identity_issuer,
             "sub": user["id"],
             "aud": code_doc["client_id"],
             "iat": int(now.timestamp()),

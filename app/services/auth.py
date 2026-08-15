@@ -15,7 +15,9 @@ from app.services.key_manager import key_manager
 
 
 class AuthService:
-    def __init__(self, user_repo: UserRepository, refresh_token_repo: RefreshTokenRepository, app_repo: ApplicationRepository):
+    def __init__(
+        self, user_repo: UserRepository, refresh_token_repo: RefreshTokenRepository, app_repo: ApplicationRepository
+    ):
         """
         Initializes the AuthService.
         """
@@ -81,7 +83,7 @@ class AuthService:
         now = datetime.now(timezone.utc)
         exp = now + timedelta(minutes=settings.jwt_expiration_minutes)
         payload = {
-            "iss": settings.jwt_issuer,
+            "iss": settings.identity_issuer,
             "sub": user["id"],
             "aud": "application_api",
             "app_id": app_id,
@@ -135,7 +137,7 @@ class AuthService:
         now = datetime.now(timezone.utc)
         exp = now + timedelta(minutes=settings.jwt_expiration_minutes)
         payload = {
-            "iss": settings.jwt_issuer,
+            "iss": settings.identity_issuer,
             "sub": f"service:{app_id}",
             "aud": audience,
             "app_id": app_id,
