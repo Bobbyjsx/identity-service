@@ -19,6 +19,7 @@ class UserResponse(BaseModel):
     last_name: str | None = None
     created_at: datetime
     roles: list[str] = []
+    email_verified: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -30,4 +31,5 @@ class UserModel(BaseModel):
     first_name: str | None = None
     last_name: str | None = None
     roles: list[str] = Field(default_factory=list)
+    email_verified: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())

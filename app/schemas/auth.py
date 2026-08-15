@@ -7,6 +7,7 @@ class Token(BaseModel):
     token_type: str
     expires_in: int
     refresh_token: str | None = None
+    id_token: str | None = None
 
 class OAuth2ClientCredentialsRequest(BaseModel):
     grant_type: str

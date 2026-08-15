@@ -2,13 +2,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
 from app.core.database import get_db_client, init_db
+from app.core.errors import OAuthError
 from app.routers import well_known
-from app.routers.api.v1 import applications, auth, rbac
+from app.routers.api.v1 import applications, auth, oauth, rbac
 
 
 @asynccontextmanager
@@ -53,9 +55,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(SecurityHeadersMiddleware)
 
+@app.exception_handler(OAuthError)
+async def oauth_error_handler(request: Request, exc: OAuthError):
+    """
+    Renders OAuth errors as {"error": ..., "error_description": ...}
+    so OAuth clients and the hosted Identity UI can handle them programmatically.
+    """
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.error, "error_description": exc.error_description},
+    )
+
 app.include_router(well_known.router)
 app.include_router(applications.router, prefix="/api/v1/applications", tags=["Applications"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(oauth.router, prefix="/api/v1/oauth", tags=["OAuth"])
 app.include_router(rbac.router, prefix="/api/v1")
 
 @app.get("/health")
