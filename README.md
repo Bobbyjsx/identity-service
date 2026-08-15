@@ -1,121 +1,122 @@
 # Identity Service
 
-A generic, centralized Identity and Authentication service built with FastAPI and Google Cloud Firestore. 
+A multi-tenant identity provider. You register an application, users belong
+to that application, and this service issues Ed25519-signed JWTs that your
+APIs verify locally from a JWKS endpoint.
 
-The Identity Service acts as the central authority for user identities, application/client isolation, authentication, and authorization. It issues secure JSON Web Tokens (JWTs) signed with Ed25519 asymmetric keys, allowing downstream microservices to verify authentication statelessly using a public JWKS endpoint.
+It is the identity provider — not a wrapper around one. The hosted login UI
+collects credentials; this service stores users, runs OAuth, and signs tokens.
 
-## Features
+## Docs
 
-- **Application & Tenant Isolation**: Securely isolates users, roles, and permissions across different registered applications using a strict multi-tenant data model.
-- **Asymmetric JWT Issuance**: Issues short-lived access tokens and long-lived refresh tokens signed with highly secure Ed25519 cryptographic keys.
-- **Stateless Verification**: Target services do not need to round-trip to the Identity Service for every request. They simply verify JWTs locally by fetching the public keys from `/.well-known/jwks.json`.
-- **Role-Based Access Control (RBAC)**: Fine-grained roles and permissions management tied directly to users and applications.
-- **Service-to-Service Auth**: Supports application credential issuance (Client ID and Client Secret) for secure machine-to-machine OAuth workflows.
-- **Local Emulator Support**: Fully integrated with the Google Cloud Firestore Emulator via Docker for reliable local development and testing.
+The README is setup. The docs are how the system works.
+
+| Document | Contents |
+| --- | --- |
+| [Docs index](docs/README.md) | Where to start |
+| [How it works](docs/how-it-works.md) | Parties, tenancy, how data moves |
+| [Create an application](docs/create-an-app.md) | Register an app and sign a user in |
+| [OAuth lifecycle](docs/oauth-lifecycle.md) | Redirect flow between your app, this service, and the login UI |
+| [Tokens](docs/tokens.md) | Access, refresh, ID, and service tokens |
+| [Reference](docs/reference.md) | Endpoints, environment, errors, collections |
+
+## What you get
+
+- **Application isolation.** Users, roles, and tokens are scoped to the
+  application you register. The same email on two applications is two users.
+- **Two login paths.** Direct email/password against `/api/v1/auth/*`, or
+  OAuth 2.0 authorization code with PKCE and optional OpenID Connect.
+- **Stateless verification.** Downstream services cache
+  `/.well-known/jwks.json` and check `Authorization: Bearer` locally.
+- **Machine-to-machine.** Client credentials grant for service tokens.
+- **Local emulator.** Firestore via Docker Compose.
 
 ## Prerequisites
 
 - Python 3.10+
-- Docker & Docker Compose (for the local Firestore emulator)
+- Docker and Docker Compose (Firestore emulator)
 
-## Getting Started
+## Getting started
 
-### 1. Environment Setup
+### 1. Environment
 
-1. Clone the repository and navigate into it.
-2. Create and activate a Python virtual environment:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
-3. Install the dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-### 2. Configuration (`.env`)
-
-The service relies on a `.env` file for configuration. Create a `.env` in the root directory:
+Create a `.env` in the repo root:
 
 ```ini
 ENVIRONMENT=development
 FIRESTORE_DATABASE=identity-service
 GOOGLE_APPLICATION_CREDENTIALS=firebase-credentials.json
+ADMIN_SECRET=changeme-in-prod
 JWT_EXPIRATION_MINUTES=15
-REFRESH_TOKEN_EXPIRATION_DAYS=30
 
-# The private key must be a PEM-encoded Ed25519 private key.
-# If omitted in development, the service will generate one in memory and print it out.
+# PEM-encoded Ed25519 private key. If omitted in development, the process
+# generates one and prints the line to paste back here.
 PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n..."
+
+IDENTITY_UI_BASE_URL=http://localhost:3000
+PUBLIC_BASE_URL=http://localhost:8002
+OIDC_ISSUER=http://localhost:8002
 ```
 
-*(Note: When you run the application in development without a `PRIVATE_KEY` defined, it will automatically generate a secure one and print the exact configuration string you need to paste into your `.env`.)*
+The full list of settings is in [Reference](docs/reference.md#environment).
 
-### 3. Start the Firestore Emulator
-
-Local development relies on the Google Cloud Firestore emulator via Docker Compose:
+### 2. Firestore emulator
 
 ```bash
 docker compose up -d firestore
 ```
 
-### 4. Run the Service
-
-Start the FastAPI application using Uvicorn:
+### 3. Run the service
 
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
 ```
 
-The service will be available at `http://localhost:8002`.
-Interactive Swagger UI documentation is automatically generated at `http://localhost:8002/docs`.
+- API: `http://localhost:8002`
+- OpenAPI UI: `http://localhost:8002/docs`
+- Health: `http://localhost:8002/health`
 
----
+### 4. Create an application
+
+```bash
+curl -s http://localhost:8002/api/v1/applications \
+  -H "X-Admin-Token: $ADMIN_SECRET" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Storefront"}'
+```
+
+That returns a `client_id` and a one-time `client_secret`. From there,
+[Create an application](docs/create-an-app.md) covers configuration, user
+login, OAuth, and machine-to-machine tokens.
 
 ## Testing
 
-The test suite runs directly against the Firestore Emulator to guarantee high fidelity.
+Tests run against the Firestore emulator.
 
-1. Ensure the emulator is running (`docker compose up -d firestore`).
-2. Run pytest:
-   ```bash
-   PYTHONPATH=. pytest tests/ -v
-   ```
+```bash
+docker compose up -d firestore
+PYTHONPATH=. pytest tests/ -v
+```
 
----
+Or `make test`.
 
-## Architecture & Integration
-
-### JWKS (JSON Web Key Set)
-Downstream services authenticate requests by validating the JWT access token without directly calling the Identity Service. 
-1. The target service retrieves the public keys from: `GET /api/v1/auth/.well-known/jwks.json`
-2. It caches the public keys.
-3. For incoming API requests, it locally verifies the `Authorization: Bearer <token>` signature using the cached public keys, ensuring the `exp` (expiration) and `aud` (audience) claims are valid.
-
-### Core API Endpoints
-
-- **Applications**: `POST /api/v1/applications` to register a new tenant application.
-- **Auth**: `POST /api/v1/auth/signup` and `POST /api/v1/auth/login` to authenticate users.
-- **RBAC**: `POST /api/v1/rbac/roles` and `POST /api/v1/rbac/permissions` to build authorization rules (restricted to admin users).
-- **OAuth2**: `POST /api/v1/auth/oauth/token` OAuth2 Client Credentials grant for M2M service authentication
-- **Refresh**: `POST /api/v1/auth/refresh` Refresh access tokens
-- **Profile**: `GET /api/v1/auth/me` Retrieve authenticated user profile
-
-
-*(For detailed endpoint schemas, run the service and navigate to `/docs`.)*
-
-## Project Structure
+## Project structure
 
 ```
-├── app/
-│   ├── core/           # Configuration, security, hashing, and exception handling
-│   ├── dependencies.py # Dependency injection for routers (auth, db, services)
-│   ├── main.py         # FastAPI application entrypoint
-│   ├── repositories/   # Firestore data access layer (Role, User, App, Permission)
-│   ├── routers/        # API route definitions (v1)
-│   ├── schemas/        # Pydantic models for validation and responses
-│   └── services/       # Core business logic and key management
-├── tests/              # Pytest suite
-├── docker-compose.yml  # Local Firestore emulator and service config
-└── requirements.txt    # Python dependencies
+app/
+  core/           configuration, Firestore, hashing, errors
+  routers/        HTTP surface
+  services/       application, auth, oauth, rbac, keys
+  repositories/   Firestore access
+  schemas/        request and document shapes
+  dependencies.py admin token, application header, current user
+  main.py         startup and middleware
+docs/             how the system works
+tests/            pytest against the emulator
 ```

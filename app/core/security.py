@@ -4,6 +4,10 @@ from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
+LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
+DANGEROUS_SCHEMES = {"javascript", "data", "file", "vbscript", "blob"}
+MAX_REDIRECT_URI_LENGTH = 2048
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
@@ -27,11 +31,6 @@ def hash_token(token: str) -> str:
     import hashlib
 
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
-DANGEROUS_SCHEMES = {"javascript", "data", "file", "vbscript", "blob"}
-MAX_REDIRECT_URI_LENGTH = 2048
 
 
 def validate_redirect_uri(uri: str) -> bool:
