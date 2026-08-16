@@ -92,6 +92,18 @@ async def session_verify_email(
     return await service.verify_email(session_id, body.verification_token)
 
 
+@router.post("/{session_id}/resend-otp")
+async def session_resend_otp(session_id: str, service: OAuthService = Depends(get_oauth_service)):
+    """
+    Resends a fresh OTP to the user's email.
+
+    Invalidates the previous OTP and resets the failed-attempt counter.
+    Only valid while the session is in the `authenticated` state (user has
+    logged in but not yet verified their email).
+    """
+    return await service.resend_otp(session_id)
+
+
 @router.post("/{session_id}/cancel")
 async def session_cancel(session_id: str, service: OAuthService = Depends(get_oauth_service)):
     """

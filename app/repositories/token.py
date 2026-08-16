@@ -39,3 +39,14 @@ class OpaqueTokenRepository(BaseRepository):
         await self.collection.document(token_id).update(
             {"status": "used", "used_at": used_at}
         )
+
+    async def increment_attempts(self, token_id: str) -> int:
+        """
+        Atomically increments the failed attempts counter.
+        Returns the new attempts count.
+        """
+        from google.cloud.firestore_v1.transforms import Increment
+        doc_ref = self.collection.document(token_id)
+        await doc_ref.update({"attempts": Increment(1)})
+        snap = await doc_ref.get()
+        return (snap.to_dict() or {}).get("attempts", 1)

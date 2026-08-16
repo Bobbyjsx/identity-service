@@ -1,11 +1,14 @@
 import base64
 import hashlib
+import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
+from google.cloud.firestore_v1.base_query import FieldFilter
+from google.cloud.firestore_v1.transforms import Increment
 
 from app.core.config import settings
 from app.core.errors import OAuthError
@@ -52,8 +55,8 @@ def generate_password_reset_token() -> str:
 
 
 def generate_verification_token() -> str:
-    """High-entropy opaque email verification token (only its hash is stored)."""
-    return f"ev_{uuid.uuid4().hex}{uuid.uuid4().hex}"
+    """Generates a 6-digit numeric OTP for email verification (only its hash is stored)."""
+    return f"{secrets.randbelow(900000) + 100000}"
 
 
 def _now_iso() -> str:
@@ -377,16 +380,37 @@ class OAuthService:
         """
         Verifies a user's email for a session awaiting verification,
         then issues the authorization code.
+
+        Failed OTP attempts are counted on the session document. After 5
+        wrong attempts the session is cancelled and the user must start a
+        new login flow to receive a fresh OTP.
         """
+        MAX_OTP_ATTEMPTS = 5
+
         tx, app = await self._load_session_for_operation(session_id, {"pending", "authenticated"})
         if not tx.get("user_id"):
             raise OAuthError("invalid_session_state", "No user is associated with this session")
 
         token = await self.verification_token_repo.get_by_token_hash(hash_token(verification_token))
-        if not token:
+        bound_correctly = (
+            token is not None
+            and token.get("app_id") == tx["client_id"]
+            and token.get("user_id") == tx["user_id"]
+        )
+
+        if not bound_correctly:
+            doc_ref = self.session_repo.collection.document(session_id)
+            await doc_ref.update({"otp_attempts": Increment(1)})
+            snap = await doc_ref.get()
+            attempts = (snap.to_dict() or {}).get("otp_attempts", 1)
+            if attempts >= MAX_OTP_ATTEMPTS:
+                await doc_ref.update({"status": "cancelled"})
+                raise OAuthError(
+                    "otp_attempts_exceeded",
+                    "Too many incorrect attempts. Please start a new login.",
+                )
             raise OAuthError("invalid_verification_token", "Verification token is invalid")
-        if token.get("app_id") != tx["client_id"] or token.get("user_id") != tx["user_id"]:
-            raise OAuthError("invalid_verification_token", "Verification token is invalid")
+
         if self._token_expired(token):
             raise OAuthError("verification_token_expired", "Verification token has expired")
         if token.get("status") != "active":
@@ -402,6 +426,39 @@ class OAuthService:
         raw_code = await self.issue_authorization_code(tx, app, user)
         return {"redirect_url": self._build_callback_url(tx, raw_code)}
 
+    async def resend_otp(self, session_id: str) -> dict[str, Any]:
+        """
+        Invalidates any existing active verification token for the session's
+        user, resets the session's OTP attempt counter, and sends a fresh OTP.
+
+        Only allowed while the session is still in the `authenticated` state
+        (i.e. the user has logged in but not yet verified their email).
+        """
+        tx, app = await self._load_session_for_operation(session_id, {"authenticated"})
+        if not tx.get("user_id"):
+            raise OAuthError("invalid_session_state", "No user is associated with this session")
+
+        user = await self.user_repo.get_tenant_resource(tx["client_id"], tx["user_id"])
+        if not user:
+            raise OAuthError("invalid_session_state", "User no longer exists")
+
+        # Invalidate any still-active token for this user/app pair.
+        async for doc in (
+            self.verification_token_repo.collection
+            .where(filter=FieldFilter("user_id", "==", tx["user_id"]))
+            .where(filter=FieldFilter("app_id", "==", tx["client_id"]))
+            .where(filter=FieldFilter("status", "==", "active"))
+            .stream()
+        ):
+            await self.verification_token_repo.collection.document(doc.id).update({"status": "used"})
+
+        # Reset OTP attempt counter on the session.
+        await self.session_repo.collection.document(session_id).update({"otp_attempts": 0})
+
+        # Issue and send a fresh OTP.
+        await self._issue_verification_token(tx, app, user)
+        return {"detail": "A new verification code has been sent to your email."}
+
     async def _issue_verification_token(self, tx: dict[str, Any], app: dict[str, Any], user: dict[str, Any]):
         raw_token = generate_verification_token()
         token = EmailVerificationTokenModel(
@@ -411,9 +468,8 @@ class OAuthService:
             expires_at=(_now() + timedelta(minutes=30)).isoformat(),
         )
         await self.verification_token_repo.create(token.model_dump(), id=token.id)
-        verify_url = f"{settings.identity_ui_base_url}/verify-email?session_id={tx['id']}&token={raw_token}"
         await self.notifications.send_verification_email(
-            to=user["email"], verify_url=verify_url, app_name=app.get("name", "Application")
+            to=user["email"], otp=raw_token, app_name=app.get("name", "Application")
         )
 
     # ------------------------------------------------------------------
