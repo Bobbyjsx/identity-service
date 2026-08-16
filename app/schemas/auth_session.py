@@ -72,3 +72,4 @@ class AuthSessionResponse(BaseModel):
     status: str
     application: dict
     scopes: list[str]
+    redirect_url: str | None = None
