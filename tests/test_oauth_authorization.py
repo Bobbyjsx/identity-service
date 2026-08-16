@@ -28,7 +28,7 @@ async def _expire_transaction(db, tx_id: str):
 async def test_valid_authorization_request_redirects_to_identity_ui(async_client: AsyncClient, db):
     app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, _, resp = await authorize_and_get_transaction(async_client, app_data["client_id"])
-    assert resp.headers["location"].startswith(f"{settings.identity_ui_base_url}/authorize?")
+    assert resp.headers["location"].startswith(f"{settings.identity_ui_base_url}/auth/")
 
     # Transaction persisted with all required fields
     doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()

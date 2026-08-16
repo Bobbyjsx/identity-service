@@ -181,7 +181,7 @@ class OAuthService:
         return tx
 
     def build_identity_ui_redirect(self, session_id: str) -> str:
-        return f"{settings.identity_ui_base_url}/authorize?session_id={session_id}"
+        return f"{settings.identity_ui_base_url}/auth/{session_id}/login"
 
     def build_error_redirect(self, redirect_uri: str, state: str | None, error: str, error_description: str) -> str:
         params = {"error": error, "error_description": error_description}

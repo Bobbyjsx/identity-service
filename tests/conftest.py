@@ -126,8 +126,8 @@ async def authorize_and_get_transaction(
     resp = await async_client.get("/api/v1/oauth/authorize", params=params, follow_redirects=False)
     assert resp.status_code == 302, resp.text
     location = resp.headers["location"]
-    assert "/authorize?session_id=" in location
-    tx_id = location.split("session_id=")[-1]
+    assert "/auth/" in location and "/login" in location
+    tx_id = location.split("/auth/")[-1].split("/")[0]
     return tx_id, verifier, resp
 
 
