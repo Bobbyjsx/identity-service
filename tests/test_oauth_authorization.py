@@ -281,11 +281,23 @@ async def test_completed_transaction_reuse_rejected(async_client: AsyncClient, d
 @pytest.mark.asyncio
 async def test_cancelled_transaction_reuse_rejected(async_client: AsyncClient):
     app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
-    tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
+    tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"], state="sample-state")
 
     resp = await async_client.post(f"/api/v1/auth-sessions/{tx_id}/cancel")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "cancelled"
+    data = resp.json()
+    assert data["status"] == "cancelled"
+    assert "redirect_url" in data
+    assert "error=access_denied" in data["redirect_url"]
+    assert "state=sample-state" in data["redirect_url"]
+
+    # Loading the cancelled session returns redirect_url too
+    load_resp = await async_client.get(f"/api/v1/auth-sessions/{tx_id}")
+    assert load_resp.status_code == 200
+    load_data = load_resp.json()
+    assert load_data["status"] == "cancelled"
+    assert "error=access_denied" in load_data["redirect_url"]
+    assert "state=sample-state" in load_data["redirect_url"]
 
     resp = await async_client.post(
         f"/api/v1/auth-sessions/{tx_id}/login",

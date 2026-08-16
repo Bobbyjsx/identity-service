@@ -240,12 +240,30 @@ class OAuthService:
             "require_email_verification": auth_config["require_email_verification"],
         }
 
-        return {
+        result: dict[str, Any] = {
             "session_id": tx["id"],
             "status": status,
             "application": application,
             "scopes": tx.get("scopes", []),
+            "redirect_url": None,
         }
+
+        if status == "expired":
+            result["redirect_url"] = self.build_error_redirect(
+                tx["redirect_uri"],
+                tx.get("state"),
+                error="session_expired",
+                error_description="The authorization session has expired",
+            )
+        elif status == "cancelled":
+            result["redirect_url"] = self.build_error_redirect(
+                tx["redirect_uri"],
+                tx.get("state"),
+                error="access_denied",
+                error_description="The authorization request was cancelled",
+            )
+
+        return result
 
     async def cancel_session(self, session_id: str) -> dict[str, Any]:
         tx = await self.session_repo.get(session_id)
@@ -264,7 +282,16 @@ class OAuthService:
             expected_status={status},
             new_status="cancelled",
         )
-        return {"session_id": session_id, "status": "cancelled"}
+        return {
+            "session_id": session_id,
+            "status": "cancelled",
+            "redirect_url": self.build_error_redirect(
+                tx["redirect_uri"],
+                tx.get("state"),
+                error="access_denied",
+                error_description="The user cancelled the authorization request",
+            ),
+        }
 
     async def _load_session_for_operation(
         self, session_id: str, allowed_statuses: set[str] | None = None
