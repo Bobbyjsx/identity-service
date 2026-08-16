@@ -12,7 +12,7 @@ from app.core.errors import OAuthError
 from app.core.security import get_password_hash, hash_token
 from app.repositories.application import ApplicationRepository
 from app.repositories.authorization_code import AuthorizationCodeRepository
-from app.repositories.oauth_transaction import OAuthTransactionRepository
+from app.repositories.auth_session import AuthSessionRepository
 from app.repositories.token import OpaqueTokenRepository
 from app.repositories.user import UserRepository
 from app.schemas.application import (
@@ -25,7 +25,7 @@ from app.schemas.authorization_code import (
 )
 from app.schemas.email_verification import EmailVerificationTokenModel
 from app.schemas.oauth import AuthorizationRequest, SignupRequest
-from app.schemas.oauth_transaction import OAuthTransactionModel
+from app.schemas.auth_session import AuthSessionModel
 from app.schemas.password_reset import PasswordResetTokenModel
 from app.schemas.user import UserCreate
 from app.services.application import (
@@ -40,9 +40,9 @@ from app.services.notifications import NotificationService
 
 ACTIVE_STATUS = "active"
 TRANSACTION_STATUS_ERRORS = {
-    "expired": "transaction_expired",
-    "completed": "transaction_completed",
-    "cancelled": "transaction_cancelled",
+    "expired": "session_expired",
+    "completed": "session_completed",
+    "cancelled": "session_cancelled",
 }
 
 
@@ -77,7 +77,7 @@ class OAuthService:
         app_service: Any,
         auth_service: AuthService,
         user_repo: UserRepository,
-        tx_repo: OAuthTransactionRepository,
+        session_repo: AuthSessionRepository,
         code_repo: AuthorizationCodeRepository,
         reset_token_repo: OpaqueTokenRepository,
         verification_token_repo: OpaqueTokenRepository,
@@ -87,7 +87,7 @@ class OAuthService:
         self.app_service = app_service
         self.auth_service = auth_service
         self.user_repo = user_repo
-        self.tx_repo = tx_repo
+        self.session_repo = session_repo
         self.code_repo = code_repo
         self.reset_token_repo = reset_token_repo
         self.verification_token_repo = verification_token_repo
@@ -149,9 +149,9 @@ class OAuthService:
                 f"The {grant} grant is not enabled for this application",
             )
 
-    async def create_transaction(self, req: AuthorizationRequest) -> OAuthTransactionModel:
+    async def create_session(self, req: AuthorizationRequest) -> AuthSessionModel:
         """
-        Validates an authorization request and persists an OAuth transaction.
+        Validates an authorization request and persists an OAuth session.
         """
         app = await self.resolve_client(req.client_id)
         self.validate_redirect(app, req.redirect_uri)
@@ -161,8 +161,8 @@ class OAuthService:
         scopes = [s for s in (req.scope or "").split(" ") if s]
         self.validate_scopes(app, scopes)
 
-        expires_at = _now() + timedelta(minutes=settings.oauth_transaction_expiration_minutes)
-        tx = OAuthTransactionModel(
+        expires_at = _now() + timedelta(minutes=settings.auth_session_expiration_minutes)
+        tx = AuthSessionModel(
             application_id=app["id"],
             client_id=app["client_id"],
             redirect_uri=req.redirect_uri,
@@ -174,11 +174,11 @@ class OAuthService:
             nonce=req.nonce,
             expires_at=expires_at.isoformat(),
         )
-        await self.tx_repo.create(tx.model_dump(), id=tx.id)
+        await self.session_repo.create(tx.model_dump(), id=tx.id)
         return tx
 
-    def build_identity_ui_redirect(self, transaction_id: str) -> str:
-        return f"{settings.identity_ui_base_url}/authorize?transaction_id={transaction_id}"
+    def build_identity_ui_redirect(self, session_id: str) -> str:
+        return f"{settings.identity_ui_base_url}/authorize?session_id={session_id}"
 
     def build_error_redirect(self, redirect_uri: str, state: str | None, error: str, error_description: str) -> str:
         params = {"error": error, "error_description": error_description}
@@ -188,13 +188,13 @@ class OAuthService:
         return f"{redirect_uri}{sep}{urlencode(params)}"
 
     # ------------------------------------------------------------------
-    # Transaction loading / lifecycle
+    # Session loading / lifecycle
     # ------------------------------------------------------------------
 
     def effective_status(self, tx: dict[str, Any]) -> str:
         """
-        Computes the effective transaction status, treating past-expiry
-        transactions as expired.
+        Computes the effective session status, treating past-expiry
+        sessions as expired.
         """
         if tx.get("status") in ("cancelled", "completed"):
             return tx["status"]
@@ -206,18 +206,18 @@ class OAuthService:
             return "expired"
         return tx.get("status") or "pending"
 
-    async def load_transaction(self, transaction_id: str) -> dict[str, Any]:
+    async def load_session(self, session_id: str) -> dict[str, Any]:
         """
-        Returns the safe transaction context for the hosted Identity UI.
+        Returns the safe session context for the hosted Identity UI.
         Never exposes secrets, state, challenges, or user data.
         """
-        tx = await self.tx_repo.get(transaction_id)
+        tx = await self.session_repo.get(session_id)
         if not tx:
-            raise OAuthError("invalid_transaction", "Transaction not found", status_code=404)
+            raise OAuthError("invalid_session", "Session not found", status_code=404)
 
         status = self.effective_status(tx)
         if status == "expired" and tx.get("status") != "expired":
-            await self.tx_repo.collection.document(tx["id"]).update({"status": "expired"})
+            await self.session_repo.collection.document(tx["id"]).update({"status": "expired"})
 
         app = await self.app_repo.get(tx.get("application_id", ""))
         if not app:
@@ -229,6 +229,7 @@ class OAuthService:
             "name": app.get("name", "Unknown application"),
             "description": app.get("description"),
             "logo_url": branding["logo_url"],
+            "logo_with_text": branding.get("logo_with_text"),
             "primary_color": branding["primary_color"],
             "secondary_color": branding["secondary_color"],
             "allow_signup": auth_config["allow_signup"],
@@ -237,55 +238,55 @@ class OAuthService:
         }
 
         return {
-            "transaction_id": tx["id"],
+            "session_id": tx["id"],
             "status": status,
             "application": application,
             "scopes": tx.get("scopes", []),
         }
 
-    async def cancel_transaction(self, transaction_id: str) -> dict[str, Any]:
-        tx = await self.tx_repo.get(transaction_id)
+    async def cancel_session(self, session_id: str) -> dict[str, Any]:
+        tx = await self.session_repo.get(session_id)
         if not tx:
-            raise OAuthError("invalid_transaction", "Transaction not found", status_code=404)
+            raise OAuthError("invalid_session", "Session not found", status_code=404)
         status = self.effective_status(tx)
         if status == "expired":
-            raise OAuthError("transaction_expired", "Transaction has expired")
+            raise OAuthError("session_expired", "Session has expired")
         if status not in {"pending", "authenticated"}:
             raise OAuthError(
-                TRANSACTION_STATUS_ERRORS.get(status, "invalid_transaction_state"),
-                f"Transaction is already {status}",
+                TRANSACTION_STATUS_ERRORS.get(status, "invalid_session_state"),
+                f"Session is already {status}",
             )
-        await self.tx_repo.claim_transaction(
-            transaction_id,
+        await self.session_repo.claim_session(
+            session_id,
             expected_status={status},
             new_status="cancelled",
         )
-        return {"transaction_id": transaction_id, "status": "cancelled"}
+        return {"session_id": session_id, "status": "cancelled"}
 
-    async def _load_transaction_for_operation(
-        self, transaction_id: str, allowed_statuses: set[str] | None = None
+    async def _load_session_for_operation(
+        self, session_id: str, allowed_statuses: set[str] | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """
-        Validates a transaction is present, not expired, in an allowed state,
+        Validates a session is present, not expired, in an allowed state,
         and that its application is active. Returns (tx, app).
         """
         allowed_statuses = allowed_statuses or {"pending"}
-        tx = await self.tx_repo.get(transaction_id)
+        tx = await self.session_repo.get(session_id)
         if not tx:
-            raise OAuthError("invalid_transaction", "Transaction not found", status_code=404)
+            raise OAuthError("invalid_session", "Session not found", status_code=404)
 
         status = self.effective_status(tx)
         if status == "expired":
-            raise OAuthError("transaction_expired", "Authorization transaction has expired")
+            raise OAuthError("session_expired", "Authorization session has expired")
         if status in TRANSACTION_STATUS_ERRORS:
-            raise OAuthError(TRANSACTION_STATUS_ERRORS[status], f"Transaction is already {status}")
+            raise OAuthError(TRANSACTION_STATUS_ERRORS[status], f"Session is already {status}")
         if status == "authenticated" and "authenticated" not in allowed_statuses:
             raise OAuthError(
                 "email_verification_required",
                 "The user must verify their email before continuing",
             )
         if status not in allowed_statuses:
-            raise OAuthError("invalid_transaction_state", "Operation not allowed in the current transaction state")
+            raise OAuthError("invalid_session_state", "Operation not allowed in the current session state")
 
         app = await self.app_repo.get(tx.get("application_id", ""))
         if not app or app.get("status") != ACTIVE_STATUS:
@@ -301,13 +302,13 @@ class OAuthService:
         if not auth_config["allow_password_login"]:
             raise OAuthError("password_login_disabled", "Password login is disabled for this application")
 
-    async def login(self, transaction_id: str, email: str, password: str) -> dict[str, Any]:
+    async def login(self, session_id: str, email: str, password: str) -> dict[str, Any]:
         """
-        Transaction-bound login. Authenticates the user within the
-        transaction's application, then moves toward authorization-code
+        Session-bound login. Authenticates the user within the
+        session's application, then moves toward authorization-code
         issuance. Never returns tokens.
         """
-        tx, app = await self._load_transaction_for_operation(transaction_id, {"pending"})
+        tx, app = await self._load_session_for_operation(session_id, {"pending"})
         self._require_password_login(app)
 
         try:
@@ -321,13 +322,13 @@ class OAuthService:
 
         return await self._complete_authentication(tx, app, user)
 
-    async def signup(self, transaction_id: str, signup_in: SignupRequest) -> dict[str, Any]:
+    async def signup(self, session_id: str, signup_in: SignupRequest) -> dict[str, Any]:
         """
-        Transaction-bound signup. Creates the user within the transaction's
+        Session-bound signup. Creates the user within the session's
         application (when allowed) and moves toward authorization-code
         issuance. Never returns tokens.
         """
-        tx, app = await self._load_transaction_for_operation(transaction_id, {"pending"})
+        tx, app = await self._load_session_for_operation(session_id, {"pending"})
 
         user_in = UserCreate(
             email=signup_in.email,
@@ -352,15 +353,15 @@ class OAuthService:
         self, tx: dict[str, Any], app: dict[str, Any], user: dict[str, Any]
     ) -> dict[str, Any]:
         """
-        Finishes the transaction-side of authentication.
+        Finishes the session-side of authentication.
 
         The pending → authenticated claim is atomic: only one concurrent
-        login/signup can progress the transaction. Authorization codes are
+        login/signup can progress the session. Authorization codes are
         issued only after that claim succeeds.
         """
         auth_config = get_app_authentication_config(app)
         if auth_config["require_email_verification"] and not user.get("email_verified", False):
-            claimed = await self.tx_repo.claim_transaction(
+            claimed = await self.session_repo.claim_session(
                 tx["id"],
                 expected_status="pending",
                 new_status="authenticated",
@@ -372,14 +373,14 @@ class OAuthService:
         raw_code = await self.issue_authorization_code(tx, app, user, expected_status="pending")
         return {"redirect_url": self._build_callback_url(tx, raw_code), "email_verification_required": False}
 
-    async def verify_email(self, transaction_id: str, verification_token: str) -> dict[str, Any]:
+    async def verify_email(self, session_id: str, verification_token: str) -> dict[str, Any]:
         """
-        Verifies a user's email for a transaction awaiting verification,
+        Verifies a user's email for a session awaiting verification,
         then issues the authorization code.
         """
-        tx, app = await self._load_transaction_for_operation(transaction_id, {"pending", "authenticated"})
+        tx, app = await self._load_session_for_operation(session_id, {"pending", "authenticated"})
         if not tx.get("user_id"):
-            raise OAuthError("invalid_transaction_state", "No user is associated with this transaction")
+            raise OAuthError("invalid_session_state", "No user is associated with this session")
 
         token = await self.verification_token_repo.get_by_token_hash(hash_token(verification_token))
         if not token:
@@ -393,7 +394,7 @@ class OAuthService:
 
         user = await self.user_repo.get_tenant_resource(tx["client_id"], tx["user_id"])
         if not user:
-            raise OAuthError("invalid_transaction_state", "User no longer exists")
+            raise OAuthError("invalid_session_state", "User no longer exists")
 
         await self.user_repo.collection.document(user["id"]).update({"email_verified": True})
         await self.verification_token_repo.mark_used(token["id"], _now_iso())
@@ -410,7 +411,7 @@ class OAuthService:
             expires_at=(_now() + timedelta(minutes=30)).isoformat(),
         )
         await self.verification_token_repo.create(token.model_dump(), id=token.id)
-        verify_url = f"{settings.identity_ui_base_url}/verify-email?transaction_id={tx['id']}&token={raw_token}"
+        verify_url = f"{settings.identity_ui_base_url}/verify-email?session_id={tx['id']}&token={raw_token}"
         await self.notifications.send_verification_email(
             to=user["email"], verify_url=verify_url, app_name=app.get("name", "Application")
         )
@@ -419,14 +420,14 @@ class OAuthService:
     # Password reset
     # ------------------------------------------------------------------
 
-    async def forgot_password(self, transaction_id: str, email: str) -> dict[str, Any]:
+    async def forgot_password(self, session_id: str, email: str) -> dict[str, Any]:
         """
-        Initiates a password reset for the transaction's application.
+        Initiates a password reset for the session's application.
 
         Enumeration-safe: returns the same response whether or not the email
         has an account. The reset token is only delivered by email.
         """
-        tx, app = await self._load_transaction_for_operation(transaction_id, {"pending"})
+        tx, app = await self._load_session_for_operation(session_id, {"pending"})
 
         user = await self.user_repo.get_by_email(tx["client_id"], email)
         if user:
@@ -473,22 +474,22 @@ class OAuthService:
         await self.reset_token_repo.mark_used(token["id"], _now_iso())
         await self.auth_service.refresh_token_repo.revoke_user_tokens(user["id"], user["app_id"])
 
-    async def reset_password(self, transaction_id: str, reset_token: str, new_password: str) -> dict[str, Any]:
+    async def reset_password(self, session_id: str, reset_token: str, new_password: str) -> dict[str, Any]:
         """
-        Transaction-bound password reset. The transaction provides application
+        Session-bound password reset. The session provides application
         context; the reset token carries its own independent lifecycle.
         """
-        tx, _ = await self._load_transaction_for_operation(transaction_id, {"pending"})
+        tx, _ = await self._load_session_for_operation(session_id, {"pending"})
         token, user = await self._load_reset_token(reset_token)
         if token["app_id"] != tx["client_id"]:
-            raise OAuthError("invalid_reset_token", "Password reset token does not match this transaction")
+            raise OAuthError("invalid_reset_token", "Password reset token does not match this session")
         await self._apply_password_reset(token, user, new_password)
         return {"detail": "Password has been reset. You can now sign in."}
 
     async def reset_password_standalone(self, reset_token: str, new_password: str) -> dict[str, Any]:
         """
         Standalone password reset used when the email link is opened outside
-        an active authorization transaction.
+        an active authorization session.
         """
         token, user = await self._load_reset_token(reset_token)
         await self._apply_password_reset(token, user, new_password)
@@ -507,13 +508,13 @@ class OAuthService:
     ) -> str:
         """
         Creates a short-lived, single-use authorization code bound to the
-        transaction, client, redirect URI, user, and PKCE challenge.
+        session, client, redirect URI, user, and PKCE challenge.
         Only the SHA-256 hash of the code is persisted.
         """
         raw_code = generate_authorization_code()
         code = AuthorizationCodeModel(
             code_hash=hash_token(raw_code),
-            transaction_id=tx["id"],
+            session_id=tx["id"],
             application_id=tx["application_id"],
             client_id=tx["client_id"],
             user_id=user["id"],
@@ -524,10 +525,10 @@ class OAuthService:
             nonce=tx.get("nonce"),
             expires_at=(_now() + timedelta(minutes=settings.oauth_authorization_code_expiration_minutes)).isoformat(),
         )
-        await self.tx_repo.complete_with_code(
-            transaction_id=tx["id"],
+        await self.session_repo.complete_with_code(
+            session_id=tx["id"],
             expected_status=expected_status,
-            tx_updates={
+            session_updates={
                 "status": "completed",
                 "user_id": user["id"],
                 "completed_at": _now_iso(),
@@ -599,13 +600,13 @@ class OAuthService:
         if challenge != code_doc.get("code_challenge"):
             raise OAuthError("invalid_grant", "PKCE verification failed")
 
-        tx = await self.tx_repo.get(code_doc["transaction_id"])
+        tx = await self.session_repo.get(code_doc["session_id"])
         if not tx:
-            raise OAuthError("invalid_grant", "Authorization transaction not found")
+            raise OAuthError("invalid_grant", "Authorization session not found")
         if tx.get("application_id") != code_doc.get("application_id"):
-            raise OAuthError("invalid_grant", "Authorization transaction mismatch")
+            raise OAuthError("invalid_grant", "Authorization session mismatch")
         if self.effective_status(tx) != "completed":
-            raise OAuthError("invalid_grant", "Authorization transaction is not completed")
+            raise OAuthError("invalid_grant", "Authorization session is not completed")
 
         user = await self.user_repo.get_tenant_resource(code_doc["client_id"], code_doc["user_id"])
         if not user:
@@ -684,6 +685,7 @@ class OAuthService:
             name=app.get("name", "Unknown application"),
             description=app.get("description"),
             logo_url=branding["logo_url"],
+            logo_with_text=branding.get("logo_with_text"),
             primary_color=branding["primary_color"],
             secondary_color=branding["secondary_color"],
             allow_signup=auth_config["allow_signup"],

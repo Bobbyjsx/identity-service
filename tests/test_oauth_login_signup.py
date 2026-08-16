@@ -27,7 +27,7 @@ async def test_transaction_login_success(async_client: AsyncClient, db):
     )
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 200
@@ -49,7 +49,7 @@ async def test_transaction_login_success(async_client: AsyncClient, db):
     assert "id_token" not in parsed.query
 
     # Transaction is completed and associated with the user
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     assert doc["status"] == "completed"
     assert doc["user_id"]
     assert doc["completed_at"]
@@ -76,7 +76,7 @@ async def test_transaction_login_invalid_password(async_client: AsyncClient):
     )
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "wrong-password"},
     )
     assert resp.status_code == 401
@@ -91,7 +91,7 @@ async def test_transaction_login_unknown_user(async_client: AsyncClient):
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": "nobody@example.com", "password": "password123"},
     )
     assert resp.status_code == 401
@@ -101,11 +101,11 @@ async def test_transaction_login_unknown_user(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_transaction_login_unknown_transaction(async_client: AsyncClient):
     resp = await async_client.post(
-        "/api/v1/oauth/transactions/tx_nonexistent/login",
+        "/api/v1/auth-sessions/tx_nonexistent/login",
         json={"email": "a@example.com", "password": "password123"},
     )
     assert resp.status_code == 404
-    assert resp.json()["error"] == "invalid_transaction"
+    assert resp.json()["error"] == "invalid_session"
 
 
 @pytest.mark.asyncio
@@ -130,7 +130,7 @@ async def test_transaction_login_wrong_application(async_client: AsyncClient):
     )
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 401
@@ -149,7 +149,7 @@ async def test_transaction_login_disabled_for_application(async_client: AsyncCli
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": "a@example.com", "password": "password123"},
     )
     assert resp.status_code == 400
@@ -165,7 +165,7 @@ async def test_transaction_signup_success(async_client: AsyncClient, db):
 
     email = f"newuser-{uuid.uuid4().hex[:8]}@example.com"
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/signup",
+        f"/api/v1/auth-sessions/{tx_id}/signup",
         json={"email": email, "password": "password123", "username": "alice"},
     )
     assert resp.status_code == 200
@@ -193,7 +193,7 @@ async def test_transaction_signup_disabled(async_client: AsyncClient):
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/signup",
+        f"/api/v1/auth-sessions/{tx_id}/signup",
         json={"email": f"x-{uuid.uuid4().hex[:8]}@example.com", "password": "password123"},
     )
     assert resp.status_code == 403
@@ -215,7 +215,7 @@ async def test_transaction_signup_duplicate_account(async_client: AsyncClient):
     )
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/signup",
+        f"/api/v1/auth-sessions/{tx_id}/signup",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 400
@@ -229,16 +229,16 @@ async def test_transaction_signup_expired_transaction(async_client: AsyncClient,
         async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}}
     )
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
-    await db.collection("oauth_transactions").document(tx_id).update(
+    await db.collection("auth_sessions").document(tx_id).update(
         {"expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()}
     )
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/signup",
+        f"/api/v1/auth-sessions/{tx_id}/signup",
         json={"email": f"e-{uuid.uuid4().hex[:8]}@example.com", "password": "password123"},
     )
     assert resp.status_code == 400
-    assert resp.json()["error"] == "transaction_expired"
+    assert resp.json()["error"] == "session_expired"
 
 
 @pytest.mark.asyncio
@@ -277,7 +277,7 @@ async def test_email_verification_required_blocks_code_issuance(async_client: As
     # Signup requires verification: no authorization code may be issued
     email = f"v-{uuid.uuid4().hex[:8]}@example.com"
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/signup",
+        f"/api/v1/auth-sessions/{tx_id}/signup",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 200
@@ -285,21 +285,21 @@ async def test_email_verification_required_blocks_code_issuance(async_client: As
     assert data["redirect_url"] is None
     assert data["email_verification_required"] is True
 
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     assert doc["status"] == "authenticated"
     assert doc["user_id"]
 
     codes = [
         d
         async for d in db.collection("authorization_codes")
-        .where("transaction_id", "==", tx_id)
+        .where("session_id", "==", tx_id)
         .stream()
     ]
     assert len(codes) == 0
 
     # Login also cannot proceed without verification
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 400
@@ -334,7 +334,7 @@ async def test_email_verification_completes_flow(async_client: AsyncClient, db, 
 
     email = f"v-{uuid.uuid4().hex[:8]}@example.com"
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/signup",
+        f"/api/v1/auth-sessions/{tx_id}/signup",
         json={"email": email, "password": "password123"},
     )
     assert resp.json()["email_verification_required"] is True
@@ -346,7 +346,7 @@ async def test_email_verification_completes_flow(async_client: AsyncClient, db, 
     assert raw_token not in str(docs)
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/verify-email",
+        f"/api/v1/auth-sessions/{tx_id}/verify-email",
         json={"verification_token": raw_token},
     )
     assert resp.status_code == 200
@@ -355,12 +355,12 @@ async def test_email_verification_completes_flow(async_client: AsyncClient, db, 
     assert parse_qs(urlparse(data["redirect_url"]).query)["code"][0].startswith("code_")
 
     # User is now verified
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     user = (await db.collection("users").document(doc["user_id"]).get()).to_dict()
     assert user["email_verified"] is True
 
     # Transaction completed
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     assert doc["status"] == "completed"
 
 
@@ -379,7 +379,7 @@ async def test_callback_url_preserves_client_state(async_client: AsyncClient):
         headers={"x-application-id": app_data["client_id"]},
     )
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "password123"},
     )
     query = parse_qs(urlparse(resp.json()["redirect_url"]).query)

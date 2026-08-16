@@ -37,7 +37,7 @@ async def test_concurrent_login_issues_single_authorization_code(async_client: A
 
     async def login():
         return await async_client.post(
-            f"/api/v1/oauth/transactions/{tx_id}/login",
+            f"/api/v1/auth-sessions/{tx_id}/login",
             json={"email": email, "password": "password123"},
         )
 
@@ -49,14 +49,14 @@ async def test_concurrent_login_issues_single_authorization_code(async_client: A
     assert len(failures) == 1
     assert failures[0].json()["error"] in {
         "invalid_transaction_state",
-        "transaction_completed",
+        "session_completed",
         "email_verification_required",
     }
 
-    codes = [d async for d in db.collection("authorization_codes").where("transaction_id", "==", tx_id).stream()]
+    codes = [d async for d in db.collection("authorization_codes").where("session_id", "==", tx_id).stream()]
     assert len(codes) == 1
 
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     assert doc["status"] == "completed"
 
 
@@ -111,7 +111,7 @@ async def test_default_application_cannot_use_client_credentials(async_client: A
     assert resp.json()["error"] == "unauthorized_client"
 
     legacy = await async_client.post(
-        "/api/v1/auth/oauth/token",
+        "/api/v1/oauth/token",
         data={
             "grant_type": "client_credentials",
             "client_id": app_data["client_id"],
@@ -226,7 +226,7 @@ async def test_existing_application_missing_fields_gets_safe_defaults(async_clie
         .document(app_data["id"])
         .update({"branding": None, "authentication": None, "oauth": None, "client_type": None})
     )
-    resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
+    resp = await async_client.get(f"/api/v1/applications/{app_data['client_id']}/configuration")
     assert resp.status_code == 200
     config = resp.json()
     assert config["allow_signup"] is True
@@ -241,18 +241,18 @@ async def test_cancelled_transaction_cannot_be_completed(async_client: AsyncClie
     app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     email = await _signup(async_client, app_data["client_id"])
-    await async_client.post(f"/api/v1/oauth/transactions/{tx_id}/cancel")
+    await async_client.post(f"/api/v1/auth-sessions/{tx_id}/cancel")
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 400
-    assert resp.json()["error"] == "transaction_cancelled"
+    assert resp.json()["error"] == "session_cancelled"
 
-    cancel_again = await async_client.post(f"/api/v1/oauth/transactions/{tx_id}/cancel")
+    cancel_again = await async_client.post(f"/api/v1/auth-sessions/{tx_id}/cancel")
     assert cancel_again.status_code == 400
-    assert cancel_again.json()["error"] == "transaction_cancelled"
+    assert cancel_again.json()["error"] == "session_cancelled"
 
 
 @pytest.mark.asyncio
@@ -262,9 +262,9 @@ async def test_completed_transaction_cannot_be_cancelled(async_client: AsyncClie
     email = await _signup(async_client, app_data["client_id"])
     await login_and_get_code(async_client, tx_id, email, "password123")
 
-    resp = await async_client.post(f"/api/v1/oauth/transactions/{tx_id}/cancel")
+    resp = await async_client.post(f"/api/v1/auth-sessions/{tx_id}/cancel")
     assert resp.status_code == 400
-    assert resp.json()["error"] == "transaction_completed"
+    assert resp.json()["error"] == "session_completed"
 
 
 @pytest.mark.asyncio
@@ -288,21 +288,21 @@ async def test_authenticated_transaction_expires(async_client: AsyncClient, db, 
     )
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/signup",
+        f"/api/v1/auth-sessions/{tx_id}/signup",
         json={"email": f"v-{uuid.uuid4().hex[:8]}@example.com", "password": "password123"},
     )
     await (
-        db.collection("oauth_transactions")
+        db.collection("auth_sessions")
         .document(tx_id)
         .update({"expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()})
     )
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/verify-email",
+        f"/api/v1/auth-sessions/{tx_id}/verify-email",
         json={"verification_token": sent["raw"]},
     )
     assert resp.status_code == 400
-    assert resp.json()["error"] == "transaction_expired"
+    assert resp.json()["error"] == "session_expired"
 
 
 @pytest.mark.asyncio
@@ -327,27 +327,27 @@ async def test_verification_token_cannot_cross_applications(async_client: AsyncC
 
     tx_a, _, _ = await authorize_and_get_transaction(async_client, app_a["client_id"])
     await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_a}/signup",
+        f"/api/v1/auth-sessions/{tx_a}/signup",
         json={"email": f"a-{uuid.uuid4().hex[:8]}@example.com", "password": "password123"},
     )
     token_a = tokens[-1]
 
     tx_b, _, _ = await authorize_and_get_transaction(async_client, app_b["client_id"])
     await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_b}/signup",
+        f"/api/v1/auth-sessions/{tx_b}/signup",
         json={"email": f"b-{uuid.uuid4().hex[:8]}@example.com", "password": "password123"},
     )
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_b}/verify-email",
+        f"/api/v1/auth-sessions/{tx_b}/verify-email",
         json={"verification_token": token_a},
     )
     assert resp.status_code == 400
     assert resp.json()["error"] == "invalid_verification_token"
 
-    doc_b = (await db.collection("oauth_transactions").document(tx_b).get()).to_dict()
+    doc_b = (await db.collection("auth_sessions").document(tx_b).get()).to_dict()
     assert doc_b["status"] == "authenticated"
-    codes_b = [d async for d in db.collection("authorization_codes").where("transaction_id", "==", tx_b).stream()]
+    codes_b = [d async for d in db.collection("authorization_codes").where("session_id", "==", tx_b).stream()]
     assert codes_b == []
 
 
@@ -355,8 +355,7 @@ async def test_verification_token_cannot_cross_applications(async_client: AsyncC
 async def test_application_create_accepts_full_configuration(async_client: AsyncClient):
     from app.core.config import settings as app_settings
 
-    resp = await async_client.post(
-        "/api/v1/applications",
+    resp = await async_client.post("/api/v1/admin/applications",
         json={
             "name": "Provisioned",
             "description": "created atomically",
@@ -373,7 +372,7 @@ async def test_application_create_accepts_full_configuration(async_client: Async
     client_id = resp.json()["client_id"]
 
     detail = await async_client.get(
-        f"/api/v1/applications/{client_id}/configuration",
+        f"/api/v1/admin/applications/{client_id}",
         headers={"x-admin-token": app_settings.admin_secret},
     )
     body = detail.json()
@@ -390,7 +389,7 @@ async def test_public_configuration_hides_internal_fields(async_client: AsyncCli
         client_type="confidential",
         config={"oauth": {"redirect_uris": [REDIRECT_URI]}},
     )
-    resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
+    resp = await async_client.get(f"/api/v1/applications/{app_data['client_id']}/configuration")
     body = resp.json()
     for hidden in (
         "client_secret",

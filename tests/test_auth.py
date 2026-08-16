@@ -19,8 +19,7 @@ async def test_invalid_application_context_signup(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_valid_signup_and_token_format(async_client: AsyncClient):
     # Create App
-    app_resp = await async_client.post(
-        "/api/v1/applications", json={"name": "Test App"}, headers={"x-admin-token": settings.admin_secret}
+    app_resp = await async_client.post("/api/v1/admin/applications", json={"name": "Test App"}, headers={"x-admin-token": settings.admin_secret}
     )
     app_data = app_resp.json()
     client_id = app_data["client_id"]
@@ -57,8 +56,7 @@ async def test_valid_signup_and_token_format(async_client: AsyncClient):
 @pytest.mark.asyncio
 async def test_service_token_audience(async_client: AsyncClient):
     # Create App
-    app_resp = await async_client.post(
-        "/api/v1/applications",
+    app_resp = await async_client.post("/api/v1/admin/applications",
         json={
             "name": "Test App",
             "oauth": {"allowed_grants": ["authorization_code", "client_credentials"]},
@@ -71,7 +69,7 @@ async def test_service_token_audience(async_client: AsyncClient):
 
     # Get service token
     token_resp = await async_client.post(
-        "/api/v1/auth/oauth/token",
+        "/api/v1/oauth/token",
         data={
             "grant_type": "client_credentials",
             "client_id": client_id,

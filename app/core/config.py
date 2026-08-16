@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     identity_ui_base_url: str = "http://localhost:3000"
     public_base_url: str = "http://localhost:8002"
-    oauth_transaction_expiration_minutes: int = 10
+    auth_session_expiration_minutes: int = 10
     oauth_authorization_code_expiration_minutes: int = 5
     password_reset_token_expiration_minutes: int = 30
 

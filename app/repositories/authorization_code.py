@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 @async_transactional
-async def _redeem_in_transaction(
+async def _redeem_in_session(
     tx: AsyncTransaction,
     collection,
     code_id: str,
@@ -22,7 +22,7 @@ async def _redeem_in_transaction(
     used_at: str,
 ) -> bool:
     """
-    Reads the code inside the transaction and atomically marks it used.
+    Reads the code inside the session and atomically marks it used.
     The async_transactional decorator retries on commit conflicts, so
     concurrent redemption attempts can never both succeed.
     """
@@ -64,7 +64,7 @@ class AuthorizationCodeRepository(BaseRepository):
         last_error: Exception | None = None
         for attempt in range(3):
             try:
-                return await _redeem_in_transaction(
+                return await _redeem_in_session(
                     self.db.transaction(), self.collection, code_id, code_hash, expected_status, used_at
                 )
             except (Aborted, ValueError) as exc:

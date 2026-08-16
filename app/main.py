@@ -13,7 +13,7 @@ from starlette.responses import Response
 from app.core.database import get_db_client, init_db
 from app.core.errors import OAuthError
 from app.routers import well_known
-from app.routers.api.v1 import applications, auth, oauth, rbac
+from app.routers.api.v1 import admin, applications, auth, auth_sessions, oauth, rbac
 
 logger = logging.getLogger(__name__)
 
@@ -96,8 +96,10 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(well_known.router)
+app.include_router(admin.router, prefix="/api/v1/admin", tags=["Admin"])
 app.include_router(applications.router, prefix="/api/v1/applications", tags=["Applications"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
+app.include_router(auth_sessions.router, prefix="/api/v1/auth-sessions", tags=["Auth Sessions"])
 app.include_router(oauth.router, prefix="/api/v1/oauth", tags=["OAuth"])
 app.include_router(rbac.router, prefix="/api/v1")
 

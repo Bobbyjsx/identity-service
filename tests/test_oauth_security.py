@@ -35,7 +35,7 @@ async def test_cross_application_transaction_isolation(async_client: AsyncClient
 
     # App B's user cannot authenticate through app A's transaction
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_a}/login",
+        f"/api/v1/auth-sessions/{tx_a}/login",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 401
@@ -45,7 +45,7 @@ async def test_cross_application_transaction_isolation(async_client: AsyncClient
     # only; it does not collide with (or affect) the app B account.
     tx_a2, _, _ = await authorize_and_get_transaction(async_client, app_a["client_id"])
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_a2}/signup",
+        f"/api/v1/auth-sessions/{tx_a2}/signup",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 200
@@ -94,7 +94,7 @@ async def test_cross_application_configuration_isolation(async_client: AsyncClie
         },
     )
     app_b = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
-    config_b = (await async_client.get(f"/api/v1/oauth/applications/{app_b['client_id']}/configuration")).json()
+    config_b = (await async_client.get(f"/api/v1/applications/{app_b['client_id']}/configuration")).json()
     assert config_b["primary_color"] is None
     assert config_b["primary_color"] != "#111111"
 
@@ -339,11 +339,11 @@ async def test_incorrect_audience_rejected(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_error_responses_do_not_leak_stack_traces(async_client: AsyncClient):
-    resp = await async_client.get("/api/v1/oauth/transactions/tx_nonexistent")
+    resp = await async_client.get("/api/v1/auth-sessions/tx_nonexistent")
     body = resp.text
     assert "Traceback" not in body
     assert 'File "' not in body
-    assert resp.json()["error"] == "invalid_transaction"
+    assert resp.json()["error"] == "invalid_session"
 
 
 @pytest.mark.asyncio
@@ -359,7 +359,7 @@ async def test_raw_authorization_code_never_persisted(async_client: AsyncClient,
     code = await login_and_get_code(async_client, tx_id, email, "password123")
 
     docs = [
-        d.to_dict() async for d in db.collection("authorization_codes").where("transaction_id", "==", tx_id).stream()
+        d.to_dict() async for d in db.collection("authorization_codes").where("session_id", "==", tx_id).stream()
     ]
     assert len(docs) == 1
     stored = docs[0]
@@ -376,12 +376,12 @@ async def test_transaction_secrets_not_exposed_in_documents(async_client: AsyncC
     app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
 
-    resp = await async_client.get(f"/api/v1/oauth/transactions/{tx_id}")
+    resp = await async_client.get(f"/api/v1/auth-sessions/{tx_id}")
     body = resp.text
     for secret in ("code_challenge", "client_secret", "nonce", "state", "hashed_secret"):
         assert secret not in body
 
-    config_resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
+    config_resp = await async_client.get(f"/api/v1/applications/{app_data['client_id']}/configuration")
     body = config_resp.text
     for secret in ("client_secret", "hashed_secret", "redirect_uris"):
         assert secret not in body
@@ -398,7 +398,7 @@ async def test_callback_redirect_contains_only_code_and_state(async_client: Asyn
         headers={"x-application-id": app_data["client_id"]},
     )
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "password123"},
     )
     redirect_url = resp.json()["redirect_url"]

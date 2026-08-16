@@ -39,7 +39,7 @@ An *application* is a tenant. It is also the OAuth client.
 
 Until you create one, there is nowhere for a user to exist. Email addresses
 are unique *per application*, not globally. Roles, permissions, refresh
-tokens, and OAuth transactions are all scoped the same way.
+tokens, and OAuth sessions are all scoped the same way.
 
 Creating an application is the start of auth. The walkthrough is in
 [Create an application](create-an-app.md).
@@ -79,7 +79,7 @@ Firestore is the only datastore. Each concern has its own collection.
 | `users` | Email, password hash, profile, roles, `email_verified`, scoped by `app_id` (`client_id`) |
 | `roles` / `permissions` | RBAC definitions scoped to an application |
 | `refresh_tokens` | Opaque rotating refresh tokens |
-| `oauth_transactions` | In-progress browser logins (PKCE challenge, redirect, scopes, state) |
+| `auth_sessions` | In-progress browser logins (PKCE challenge, redirect, scopes, state) |
 | `authorization_codes` | SHA-256 of the one-time code, plus the bindings needed to redeem it |
 | `password_reset_tokens` / `email_verification_tokens` | SHA-256 of one-time email tokens |
 | `signing_keys` | Public half of the Ed25519 signing key, used to build JWKS |
@@ -140,25 +140,25 @@ machine-to-machine calls.
 
 This is the data flow, not the HTTP flow.
 
-1. **Authorize.** A row is inserted into `oauth_transactions` (`pending`).
+1. **Authorize.** A row is inserted into `auth_sessions` (`pending`).
    It binds the client, redirect URI, scopes, PKCE challenge, and optional
    `state` / `nonce`. Nothing sensitive is put in the browser URL except
-   the transaction id.
+   the session id.
 2. **Login or signup.** The user row is read or created in `users`. Then
-   the transaction is *claimed* atomically. Only one concurrent request
+   the session is *claimed* atomically. Only one concurrent request
    can win that claim.
 3. **Code issued, or wait for email.** If the application requires a
    verified email and the user is unverified, the claim is
    `pending` → `authenticated` and a hashed verification token is stored.
    Otherwise the claim is `pending` → `completed` in the same Firestore
-   transaction as the authorization-code insert.
+   session as the authorization-code insert.
 4. **Token exchange.** The code is looked up by hash, every binding is
    checked, and the row is marked `used` inside a Firestore transaction.
    An access JWT is signed. A refresh-token row is inserted. If `openid`
    was granted, an ID token is signed too. All JWTs share one issuer
    (`IDENTITY_ISSUER`).
 
-A failed login writes nothing durable except the existing transaction.
+A failed login writes nothing durable except the existing session.
 Forgot-password writes a hashed reset token only when the email exists,
 but the HTTP response is the same either way.
 
