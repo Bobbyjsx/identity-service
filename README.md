@@ -85,7 +85,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
 ### 4. Create an application
 
 ```bash
-curl -s http://localhost:8002/api/v1/applications \
+curl -s http://localhost:8002/api/v1/admin/applications \
   -H "X-Admin-Token: $ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{"name":"Storefront"}'

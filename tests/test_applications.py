@@ -7,8 +7,7 @@ from tests.conftest import REDIRECT_URI, create_application
 
 @pytest.mark.asyncio
 async def test_unauthorized_application_creation(async_client: AsyncClient):
-    response = await async_client.post(
-        "/api/v1/applications",
+    response = await async_client.post("/api/v1/admin/applications",
         json={"name": "Test App"},
         headers={"x-admin-token": "wrong_token"},
     )
@@ -18,8 +17,7 @@ async def test_unauthorized_application_creation(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_authorized_application_creation(async_client: AsyncClient):
-    response = await async_client.post(
-        "/api/v1/applications",
+    response = await async_client.post("/api/v1/admin/applications",
         json={"name": "Test App"},
         headers={"x-admin-token": settings.admin_secret},
     )
@@ -37,7 +35,7 @@ async def test_application_config_defaults(async_client: AsyncClient):
     """
     app_data = await create_application(async_client)
 
-    resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
+    resp = await async_client.get(f"/api/v1/applications/{app_data['client_id']}/configuration")
     assert resp.status_code == 200
     config = resp.json()
     assert config["name"] == app_data["name"]
@@ -75,7 +73,7 @@ async def test_application_config_persisted(async_client: AsyncClient):
         },
     )
 
-    resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
+    resp = await async_client.get(f"/api/v1/applications/{app_data['client_id']}/configuration")
     config = resp.json()
     assert config["logo_url"] == "https://cdn.example.com/logo.png"
     assert config["primary_color"] == "#112233"
@@ -106,8 +104,7 @@ async def test_application_config_validation_rejects_dangerous_values(async_clie
         {"client_type": "trusted"},
     ]
     for case in cases:
-        resp = await async_client.patch(
-            f"/api/v1/applications/{app_data['client_id']}/configuration",
+        resp = await async_client.patch(f"/api/v1/admin/applications/{app_data['client_id']}/configuration",
             json=case,
             headers={"x-admin-token": settings.admin_secret},
         )
@@ -118,13 +115,12 @@ async def test_application_config_validation_rejects_dangerous_values(async_clie
 async def test_application_config_admin_required(async_client: AsyncClient):
     app_data = await create_application(async_client)
     for headers in ({}, {"x-admin-token": "wrong_token"}):
-        resp = await async_client.patch(
-            f"/api/v1/applications/{app_data['client_id']}/configuration",
+        resp = await async_client.patch(f"/api/v1/admin/applications/{app_data['client_id']}/configuration",
             json={"branding": {"primary_color": "#000000"}},
             headers=headers,
         )
         assert resp.status_code in (403, 422), resp.text
-        config_resp = await async_client.get(f"/api/v1/oauth/applications/{app_data['client_id']}/configuration")
+        config_resp = await async_client.get(f"/api/v1/applications/{app_data['client_id']}/configuration")
         assert config_resp.json()["primary_color"] is None
 
 
@@ -134,22 +130,20 @@ async def test_application_config_partial_update_merges(async_client: AsyncClien
     client_id = app_data["client_id"]
 
     # First update: branding only
-    resp = await async_client.patch(
-        f"/api/v1/applications/{client_id}/configuration",
+    resp = await async_client.patch(f"/api/v1/admin/applications/{client_id}/configuration",
         json={"branding": {"primary_color": "#aabbcc"}},
         headers={"x-admin-token": settings.admin_secret},
     )
     assert resp.status_code == 200
 
     # Second update: authentication only - branding must survive
-    resp = await async_client.patch(
-        f"/api/v1/applications/{client_id}/configuration",
+    resp = await async_client.patch(f"/api/v1/admin/applications/{client_id}/configuration",
         json={"authentication": {"allow_signup": False}},
         headers={"x-admin-token": settings.admin_secret},
     )
     assert resp.status_code == 200
 
-    config = (await async_client.get(f"/api/v1/oauth/applications/{client_id}/configuration")).json()
+    config = (await async_client.get(f"/api/v1/applications/{client_id}/configuration")).json()
     assert config["primary_color"] == "#aabbcc"
     assert config["allow_signup"] is False
     assert config["allow_password_login"] is True
@@ -157,6 +151,6 @@ async def test_application_config_partial_update_merges(async_client: AsyncClien
 
 @pytest.mark.asyncio
 async def test_public_configuration_unknown_client(async_client: AsyncClient):
-    resp = await async_client.get("/api/v1/oauth/applications/nonexistent/configuration")
+    resp = await async_client.get("/api/v1/applications/nonexistent/configuration")
     assert resp.status_code == 404
     assert resp.json()["error"] == "invalid_client"

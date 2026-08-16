@@ -14,7 +14,7 @@ Assume the service is running at `http://localhost:8002` and
 ## 1. Register the application
 
 ```bash
-curl -s http://localhost:8002/api/v1/applications \
+curl -s http://localhost:8002/api/v1/admin/applications \
   -H "X-Admin-Token: $ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
@@ -47,7 +47,7 @@ Creating an application does not take OAuth settings. Those come next.
 
 ```bash
 curl -s -X PATCH \
-  "http://localhost:8002/api/v1/applications/$CLIENT_ID/configuration" \
+  "http://localhost:8002/api/v1/admin/applications/$CLIENT_ID/configuration" \
   -H "X-Admin-Token: $ADMIN_SECRET" \
   -H "Content-Type: application/json" \
   -d '{
@@ -91,7 +91,7 @@ Redirect URIs are matched as exact strings. `https` is required, except
 run code (`javascript:`, `data:`, …) are rejected.
 
 The Identity UI can read a public subset of this configuration at
-`GET /api/v1/oauth/applications/{client_id}/configuration`. That response
+`GET /api/v1/admin/applications/{client_id}/configuration`. That response
 never includes the secret or the redirect URI list.
 
 ## 3. Sign a user in
@@ -169,7 +169,7 @@ The result is a short-lived JWT with `type: service` and `aud` set to the
 audience you asked for. There is no refresh token. When it expires, request
 another.
 
-`POST /api/v1/auth/oauth/token` is the older URL for the same grant. New
+`POST /api/v1/oauth/token` is the older URL for the same grant. New
 integrations should use `/api/v1/oauth/token`.
 
 ## 5. Roles and permissions (optional)

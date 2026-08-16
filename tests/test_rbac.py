@@ -7,8 +7,7 @@ from app.core.config import settings
 @pytest.mark.asyncio
 async def test_rbac_flow(async_client: AsyncClient):
     # 1. Create an application
-    app_resp = await async_client.post(
-        "/api/v1/applications",
+    app_resp = await async_client.post("/api/v1/admin/applications",
         json={"name": "Test App"},
         headers={"x-admin-token": settings.admin_secret}
     )

@@ -14,7 +14,7 @@ Your application          Identity Service              Identity UI
 (OAuth client)            (IdP / this repo)             (hosted login)
 
 starts login              checks the request            shows the form
-keeps the PKCE verifier   opens a transaction           never sees secrets
+keeps the PKCE verifier   opens a session           never sees secrets
 receives code + state     issues the code               never sees tokens
 exchanges code            signs access / refresh / id
 calls your own APIs
@@ -38,13 +38,13 @@ sequenceDiagram
     App->>User: Redirect to /oauth/authorize
     User->>IdS: GET /api/v1/oauth/authorize
     IdS->>IdS: Validate client, redirect, scopes, PKCE
-    IdS->>IdS: Create pending transaction
-    IdS->>User: 302 Identity UI ?transaction_id=
+    IdS->>IdS: Create pending session
+    IdS->>User: 302 Identity UI ?session_id=
     User->>UI: Open hosted login
-    UI->>IdS: GET /oauth/transactions/{tx}
+    UI->>IdS: GET /oauth/sessions/{tx}
     IdS-->>UI: Branding, scopes, auth options (no secrets)
     User->>UI: Email + password
-    UI->>IdS: POST /oauth/transactions/{tx}/login
+    UI->>IdS: POST /oauth/sessions/{tx}/login
     IdS->>IdS: Authenticate user, issue hashed authorization code
     IdS-->>UI: { redirect_url }
     UI->>User: Navigate to redirect_url
@@ -93,7 +93,7 @@ put it on the authorize URL.
 PKCE is required for every authorization-code request, including
 confidential clients. `code_challenge_method` must be `S256`.
 
-### 2. Identity Service opens a transaction
+### 2. Identity Service opens a session
 
 Before anything is written, the service checks:
 
@@ -111,22 +111,22 @@ The service also checks that the `authorization_code` grant is enabled
 for the application. If it is not, and the redirect URI is registered,
 the browser is sent back with `unauthorized_client`.
 
-On success a row is written to `oauth_transactions` in state `pending`.
-The browser is redirected to the Identity UI with only the transaction id:
+On success a row is written to `auth_sessions` in state `pending`.
+The browser is redirected to the Identity UI with only the session id:
 
 ```
-302  {IDENTITY_UI_BASE_URL}/authorize?transaction_id=tx_…
+302  {IDENTITY_UI_BASE_URL}/authorize?session_id=tx_…
 ```
 
-The transaction holds the PKCE challenge, redirect URI, scopes, `state`,
+The session holds the PKCE challenge, redirect URI, scopes, `state`,
 and `nonce`. Those values stay on the server for the rest of the flow.
 
 ### 3. Identity UI authenticates the person
 
-The UI loads a safe view of the transaction:
+The UI loads a safe view of the session:
 
 ```
-GET /api/v1/oauth/transactions/{transaction_id}
+GET /api/v1/admin/auth-sessions/{session_id}
 ```
 
 That payload is branding, requested scopes, and the application's auth
@@ -134,16 +134,16 @@ options (`allow_signup`, `allow_password_login`,
 `require_email_verification`). It does not include `code_challenge`,
 `nonce`, `state`, or the client secret.
 
-The UI then posts to one of the transaction endpoints:
+The UI then posts to one of the session endpoints:
 
 | Action | Endpoint |
 | --- | --- |
-| Sign in | `POST /transactions/{tx}/login` |
-| Create an account | `POST /transactions/{tx}/signup` |
-| Start password reset | `POST /transactions/{tx}/forgot-password` |
-| Finish password reset | `POST /transactions/{tx}/reset-password` |
-| Confirm email | `POST /transactions/{tx}/verify-email` |
-| Abort | `POST /transactions/{tx}/cancel` |
+| Sign in | `POST /sessions/{tx}/login` |
+| Create an account | `POST /sessions/{tx}/signup` |
+| Start password reset | `POST /sessions/{tx}/forgot-password` |
+| Finish password reset | `POST /sessions/{tx}/reset-password` |
+| Confirm email | `POST /sessions/{tx}/verify-email` |
+| Abort | `POST /sessions/{tx}/cancel` |
 
 Login and signup never return tokens. On success they return either:
 
@@ -195,7 +195,7 @@ wrong secret is always `invalid_client`.
 The service checks the code exists, is unexpired and unused, belongs to
 this client, matches this redirect URI, that the application is still
 active and allows `authorization_code`, that the verifier re-derives the
-stored challenge, that the transaction is `completed`, and that the user
+stored challenge, that the session is `completed`, and that the user
 still exists. Only then is the code marked used, atomically.
 
 A second redeem of the same code fails with `invalid_grant`.
@@ -218,14 +218,14 @@ for, and how other services verify the access token, is in
 
 Refresh is not part of this endpoint. Use `POST /api/v1/auth/refresh`.
 
-## Transaction states
+## Session states
 
-A transaction is the server-side record of one in-progress login. It
+A session is the server-side record of one in-progress login. It
 expires after ten minutes by default.
 
 Written transitions are enforced atomically inside a Firestore
-transaction. Two concurrent logins cannot both progress the same
-transaction.
+session. Two concurrent logins cannot both progress the same
+session.
 
 ```
 pending ──claim + issue code──► completed          (no email verification)
@@ -238,8 +238,8 @@ authenticated ──► cancelled
 pending / authenticated ──► expired   (derived from expires_at, not written as a transition)
 ```
 
-Invalid transitions fail. A completed or cancelled transaction cannot be
-reused for login or signup. An expired transaction cannot proceed.
+Invalid transitions fail. A completed or cancelled session cannot be
+reused for login or signup. An expired session cannot proceed.
 
 | State | Meaning | What the UI can do |
 | --- | --- | --- |
@@ -261,13 +261,13 @@ When `authentication.require_email_verification` is true and the user is
 unverified, login and signup stop at `authenticated`. A verification
 token is emailed (in development the notification is logged, not sent).
 The user follows the link, the UI posts the token to
-`/transactions/{tx}/verify-email`, and the flow continues to a code.
+`/sessions/{tx}/verify-email`, and the flow continues to a code.
 
 The verification token is stored only as a hash, is single-use, and is
 bound to the application and user that requested it. A token minted for
-application A cannot advance a transaction for application B.
+application A cannot advance a session for application B.
 
-The transaction remains bound to its original client, redirect URI, PKCE
+The session remains bound to its original client, redirect URI, PKCE
 challenge, and scopes throughout.
 
 ## Password reset
@@ -276,9 +276,9 @@ Forgot-password is enumeration-safe: the response is identical whether
 or not the email has an account. If it does, a hashed reset token is
 stored and a link is emailed.
 
-The user can finish the reset inside the transaction
-(`/transactions/{tx}/reset-password`) or, if they open the email later,
-at the standalone `POST /api/v1/oauth/password/reset`. Resetting a
+The user can finish the reset inside the session
+(`/sessions/{tx}/reset-password`) or, if they open the email later,
+at the standalone `POST /api/v1/auth/password/reset`. Resetting a
 password revokes that user's refresh tokens.
 
 ## What each party is allowed to hold
@@ -287,7 +287,7 @@ password revokes that user's refresh tokens.
 | --- | --- | --- | --- | --- |
 | `client_secret` | yes (confidential clients) | hash only | no | no |
 | PKCE verifier | yes | no | no | no |
-| PKCE challenge | sent once | stored on the transaction and the code | no | no |
+| PKCE challenge | sent once | stored on the session and the code | no | no |
 | Authorization code | after callback | hash only | briefly, as `redirect_url` | callback query |
 | Access / refresh / ID tokens | after `/token` | signed, not stored (refresh row is stored) | no | no |
 | User password | only on the direct-auth path | Argon2id hash | in memory during submit | no |
@@ -304,7 +304,7 @@ the user lands on your callback with:
 If the redirect URI itself is wrong, there is nowhere safe to send the
 browser, so the service returns a JSON error instead of redirecting.
 
-Token-endpoint and transaction failures are JSON:
+Token-endpoint and session failures are JSON:
 
 ```json
 { "error": "invalid_grant", "error_description": "Authorization code has already been used" }

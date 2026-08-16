@@ -30,6 +30,7 @@ def reject_unsafe_text(value: str | None) -> str | None:
 
 class ApplicationBranding(BaseModel):
     logo_url: HttpUrl | None = None
+    logo_with_text: HttpUrl | None = None
     primary_color: Annotated[str | None, Field(pattern=COLOR_PATTERN)] = None
     secondary_color: Annotated[str | None, Field(pattern=COLOR_PATTERN)] = None
 
@@ -108,6 +109,7 @@ class PublicApplicationConfig(BaseModel):
     name: str
     description: str | None = None
     logo_url: str | None = None
+    logo_with_text: str | None = None
     primary_color: str | None = None
     secondary_color: str | None = None
     allow_signup: bool

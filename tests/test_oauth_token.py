@@ -260,7 +260,7 @@ async def test_client_credentials_flow_still_works(async_client: AsyncClient):
     """
     app_data = await create_application(async_client, config={"oauth": CLIENT_CREDENTIALS_OAUTH})
 
-    for endpoint in ("/api/v1/oauth/token", "/api/v1/auth/oauth/token"):
+    for endpoint in ("/api/v1/oauth/token", "/api/v1/oauth/token"):
         resp = await async_client.post(
             endpoint,
             data={

@@ -17,7 +17,7 @@ Admin routes require `X-Admin-Token`.
 | POST | `/api/v1/applications` | admin | Register an application. Returns `client_id` and `client_secret` once. |
 | GET | `/api/v1/applications/{client_id}/configuration` | admin | Full configuration, no secret. |
 | PATCH | `/api/v1/applications/{client_id}/configuration` | admin | Merge branding, authentication, and OAuth settings. |
-| GET | `/api/v1/oauth/applications/{client_id}/configuration` | public | Branding and auth options for the Identity UI. No secret, no redirect URIs. |
+| GET | `/api/v1/applications/{client_id}/configuration` | public | Branding and auth options for the Identity UI. No secret, no redirect URIs. |
 
 ### Direct auth
 
@@ -30,23 +30,23 @@ and `/me`.
 | POST | `/api/v1/auth/login` | Email + password → access and refresh tokens. |
 | POST | `/api/v1/auth/refresh` | Rotate a refresh token. |
 | GET | `/api/v1/auth/me` | Current user from a Bearer access token. |
-| POST | `/api/v1/auth/oauth/token` | Legacy client-credentials grant. Prefer `/api/v1/oauth/token`. |
+| POST | `/api/v1/oauth/token` | Legacy client-credentials grant. Prefer `/api/v1/oauth/token`. |
 
 ### OAuth / OIDC
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/v1/oauth/authorize` | Browser entry. Validates the request, creates a transaction, redirects to the Identity UI. |
-| POST | `/api/v1/oauth/transactions` | Admin: create a transaction without a browser redirect. |
-| GET | `/api/v1/oauth/transactions/{tx}` | Safe context for the Identity UI. |
-| POST | `/api/v1/oauth/transactions/{tx}/login` | Transaction-bound login. |
-| POST | `/api/v1/oauth/transactions/{tx}/signup` | Transaction-bound signup. |
-| POST | `/api/v1/oauth/transactions/{tx}/forgot-password` | Start reset. Enumeration-safe. |
-| POST | `/api/v1/oauth/transactions/{tx}/reset-password` | Finish reset inside a transaction. |
-| POST | `/api/v1/oauth/transactions/{tx}/verify-email` | Confirm email, then issue the code. |
-| POST | `/api/v1/oauth/transactions/{tx}/cancel` | Abort. |
+| GET | `/api/v1/oauth/authorize` | Browser entry. Validates the request, creates an auth session, redirects to the Identity UI. |
+| POST | `/api/v1/admin/auth-sessions` | Admin: create an auth session without a browser redirect. |
+| GET | `/api/v1/auth-sessions/{session_id}` | Safe context for the Identity UI. |
+| POST | `/api/v1/auth-sessions/{session_id}/login` | Session-bound login. |
+| POST | `/api/v1/auth-sessions/{session_id}/signup` | Session-bound signup. |
+| POST | `/api/v1/auth-sessions/{session_id}/forgot-password` | Start reset. Enumeration-safe. |
+| POST | `/api/v1/auth-sessions/{session_id}/reset-password` | Finish reset inside an auth session. |
+| POST | `/api/v1/auth-sessions/{session_id}/verify-email` | Confirm email, then issue the code. |
+| POST | `/api/v1/auth-sessions/{session_id}/cancel` | Abort. |
 | POST | `/api/v1/oauth/token` | `authorization_code` (PKCE required) or `client_credentials`. |
-| POST | `/api/v1/oauth/password/reset` | Finish a reset outside a transaction. |
+| POST | `/api/v1/auth/password/reset` | Finish a reset outside an auth session. |
 | GET | `/.well-known/openid-configuration` | OIDC discovery. |
 | GET | `/.well-known/jwks.json` | Public signing keys. |
 
@@ -80,7 +80,7 @@ Both require `X-Application-Id`.
 | `JWT_EXPIRATION_MINUTES` | `15` | Access, ID, and service token lifetime. |
 | `IDENTITY_UI_BASE_URL` | `http://localhost:3000` | Where `/authorize` sends the browser. |
 | `PUBLIC_BASE_URL` | `http://localhost:8002` | Origin used in discovery endpoint URLs. |
-| `OAUTH_TRANSACTION_EXPIRATION_MINUTES` | `10` | How long a login transaction stays usable. |
+| `AUTH_SESSION_EXPIRATION_MINUTES` | `10` | How long a login session stays usable. |
 | `OAUTH_AUTHORIZATION_CODE_EXPIRATION_MINUTES` | `5` | How long a `code` can be exchanged. |
 | `PASSWORD_RESET_TOKEN_EXPIRATION_MINUTES` | `30` | Reset-token lifetime. |
 
@@ -152,12 +152,12 @@ returned as a 302 to that URI with `error`, `error_description`, and
 | `unsupported_grant_type` | 400 | `grant_type` is not `authorization_code` or `client_credentials`. |
 | `unauthorized_client` | 400 | The requested grant is not enabled for this application. |
 | `server_error` | 500 | Unexpected infrastructure failure. No internal details. |
-| `invalid_transaction` | 404 | Unknown transaction id. |
-| `transaction_expired` | 400 | Transaction TTL elapsed. |
-| `transaction_completed` | 400 | Operation on a finished transaction. |
-| `transaction_cancelled` | 400 | Operation on an aborted transaction. |
+| `invalid_session` | 404 | Unknown session id. |
+| `session_expired` | 400 | Session TTL elapsed. |
+| `session_completed` | 400 | Operation on a finished session. |
+| `session_cancelled` | 400 | Operation on an aborted session. |
 | `email_verification_required` | 400 | Signed in, but the application requires a verified email. |
-| `invalid_credentials` | 401 | Bad email or password on transaction login. |
+| `invalid_credentials` | 401 | Bad email or password on session login. |
 | `signup_disabled` | 400 / 403 | `allow_signup` is false. |
 | `password_login_disabled` | 400 | `allow_password_login` is false. |
 | `invalid_reset_token` / `reset_token_expired` | 400 | Password reset token is bad, used, or expired. |
@@ -175,7 +175,7 @@ use FastAPI's usual `{"detail": "…"}` shape, not the OAuth error object.
 | `users` | document id; queried by (`app_id`, `email`) | `app_id` is the `client_id`. |
 | `roles` / `permissions` | queried by `app_id` | `app_id` here is the internal application document id. |
 | `refresh_tokens` | queried by `token` | Deleted on rotate and on password reset. |
-| `oauth_transactions` | document id = `tx_…` | Pending login state. TTL enforced on read. |
+| `auth_sessions` | document id = `tx_…` | Pending login state. TTL enforced on read. |
 | `authorization_codes` | queried by `code_hash` | Raw code is never stored. Single-use via a Firestore transaction. |
 | `password_reset_tokens` | queried by `token_hash` | Single-use. |
 | `email_verification_tokens` | queried by `token_hash` | Single-use. |
@@ -185,7 +185,7 @@ Expiry is enforced when a row is used. Stale documents are not deleted
 automatically. A periodic cleanup of rows with `expires_at` older than a
 day keeps collections bounded; correctness does not depend on it.
 
-Firestore TTL on `expires_at` for `oauth_transactions`,
+Firestore TTL on `expires_at` for `auth_sessions`,
 `authorization_codes`, `password_reset_tokens`, and
 `email_verification_tokens` is optional cleanup. TTL is not a security
 control. The service always checks `expires_at` itself.

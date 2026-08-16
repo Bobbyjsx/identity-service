@@ -69,8 +69,7 @@ async def create_application(
         body["client_type"] = client_type
     if config:
         body.update(config)
-    app_resp = await async_client.post(
-        "/api/v1/applications",
+    app_resp = await async_client.post("/api/v1/admin/applications",
         json=body,
         headers={"x-admin-token": settings.admin_secret},
     )
@@ -78,9 +77,10 @@ async def create_application(
     data = app_resp.json()
 
     detail_resp = await async_client.get(
-        f"/api/v1/applications/{data['client_id']}/configuration",
+        f"/api/v1/admin/applications/{data['client_id']}",
         headers={"x-admin-token": settings.admin_secret},
     )
+    assert detail_resp.status_code == 200, detail_resp.text
     detail = detail_resp.json()
     detail.update(data)
     return detail
@@ -126,8 +126,8 @@ async def authorize_and_get_transaction(
     resp = await async_client.get("/api/v1/oauth/authorize", params=params, follow_redirects=False)
     assert resp.status_code == 302, resp.text
     location = resp.headers["location"]
-    assert "/authorize?transaction_id=" in location
-    tx_id = location.split("transaction_id=")[-1]
+    assert "/authorize?session_id=" in location
+    tx_id = location.split("session_id=")[-1]
     return tx_id, verifier, resp
 
 
@@ -137,7 +137,7 @@ async def login_and_get_code(async_client: AsyncClient, tx_id: str, email: str, 
     from the returned callback redirect URL.
     """
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": password},
     )
     assert resp.status_code == 200, resp.text

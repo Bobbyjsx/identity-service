@@ -18,7 +18,7 @@ from tests.conftest import (
 async def _expire_transaction(db, tx_id: str):
     """Forces a transaction's expiry timestamp into the past."""
     await (
-        db.collection("oauth_transactions")
+        db.collection("auth_sessions")
         .document(tx_id)
         .update({"expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()})
     )
@@ -31,7 +31,7 @@ async def test_valid_authorization_request_redirects_to_identity_ui(async_client
     assert resp.headers["location"].startswith(f"{settings.identity_ui_base_url}/authorize?")
 
     # Transaction persisted with all required fields
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     assert doc["client_id"] == app_data["client_id"]
     assert doc["redirect_uri"] == REDIRECT_URI
     assert doc["response_type"] == "code"
@@ -199,10 +199,10 @@ async def test_load_transaction_returns_safe_context(async_client: AsyncClient):
     )
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
 
-    resp = await async_client.get(f"/api/v1/oauth/transactions/{tx_id}")
+    resp = await async_client.get(f"/api/v1/auth-sessions/{tx_id}")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["transaction_id"] == tx_id
+    assert data["session_id"] == tx_id
     assert data["status"] == "pending"
     assert data["scopes"] == ["openid", "profile", "email"]
     app = data["application"]
@@ -218,9 +218,9 @@ async def test_load_transaction_returns_safe_context(async_client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_load_transaction_unknown_transaction(async_client: AsyncClient):
-    resp = await async_client.get("/api/v1/oauth/transactions/tx_nonexistent")
+    resp = await async_client.get("/api/v1/auth-sessions/tx_nonexistent")
     assert resp.status_code == 404
-    assert resp.json()["error"] == "invalid_transaction"
+    assert resp.json()["error"] == "invalid_session"
 
 
 @pytest.mark.asyncio
@@ -230,17 +230,17 @@ async def test_expired_transaction_reported_and_unusable(async_client: AsyncClie
     await _expire_transaction(db, tx_id)
 
     # Load reports expired
-    resp = await async_client.get(f"/api/v1/oauth/transactions/{tx_id}")
+    resp = await async_client.get(f"/api/v1/auth-sessions/{tx_id}")
     assert resp.status_code == 200
     assert resp.json()["status"] == "expired"
 
     # Login must fail with transaction_expired
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": "a@example.com", "password": "password123"},
     )
     assert resp.status_code == 400
-    assert resp.json()["error"] == "transaction_expired"
+    assert resp.json()["error"] == "session_expired"
 
 
 @pytest.mark.asyncio
@@ -271,11 +271,11 @@ async def test_completed_transaction_reuse_rejected(async_client: AsyncClient, d
 
     # Login on a completed transaction must be rejected
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 400
-    assert resp.json()["error"] == "transaction_completed"
+    assert resp.json()["error"] == "session_completed"
 
 
 @pytest.mark.asyncio
@@ -283,16 +283,16 @@ async def test_cancelled_transaction_reuse_rejected(async_client: AsyncClient):
     app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
 
-    resp = await async_client.post(f"/api/v1/oauth/transactions/{tx_id}/cancel")
+    resp = await async_client.post(f"/api/v1/auth-sessions/{tx_id}/cancel")
     assert resp.status_code == 200
     assert resp.json()["status"] == "cancelled"
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": "a@example.com", "password": "password123"},
     )
     assert resp.status_code == 400
-    assert resp.json()["error"] == "transaction_cancelled"
+    assert resp.json()["error"] == "session_cancelled"
 
 
 @pytest.mark.asyncio
@@ -305,18 +305,18 @@ async def test_transaction_application_binding(async_client: AsyncClient, db):
     app_b = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_a["client_id"])
 
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     assert doc["application_id"] == app_a["id"]
 
     # A login attempt with app B's client_id cannot affect the transaction
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": f"user-{uuid.uuid4().hex[:8]}@example.com", "password": "password123"},
         headers={"x-application-id": app_b["client_id"]},
     )
     # Login errors are credential failures; the transaction is still bound to app A
     assert resp.status_code in (400, 401)
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     assert doc["application_id"] == app_a["id"]
     assert doc["client_id"] == app_a["client_id"]
 
@@ -327,7 +327,7 @@ async def test_authorize_preserves_state_and_nonce_in_transaction(async_client: 
     tx_id, _, _ = await authorize_and_get_transaction(
         async_client, app_data["client_id"], state="client-state-42", nonce="nonce-7"
     )
-    doc = (await db.collection("oauth_transactions").document(tx_id).get()).to_dict()
+    doc = (await db.collection("auth_sessions").document(tx_id).get()).to_dict()
     assert doc["state"] == "client-state-42"
     assert doc["nonce"] == "nonce-7"
 
@@ -336,14 +336,13 @@ async def test_authorize_preserves_state_and_nonce_in_transaction(async_client: 
 async def test_internal_transaction_creation_admin_protected(async_client: AsyncClient):
     app_data = await create_application(async_client, config={"oauth": {"redirect_uris": [REDIRECT_URI]}})
     params = authorize_params(app_data["client_id"])
-    resp = await async_client.post("/api/v1/oauth/transactions", json=params)
+    resp = await async_client.post("/api/v1/admin/auth-sessions", json=params)
     assert resp.status_code in (403, 422)
 
-    resp = await async_client.post(
-        "/api/v1/oauth/transactions",
+    resp = await async_client.post("/api/v1/admin/auth-sessions",
         json=params,
         headers={"x-admin-token": settings.admin_secret},
     )
     assert resp.status_code == 200
-    assert resp.json()["transaction_id"].startswith("tx_")
+    assert resp.json()["session_id"].startswith("tx_")
     assert resp.json()["status"] == "pending"

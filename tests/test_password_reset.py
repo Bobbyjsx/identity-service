@@ -39,7 +39,7 @@ def reset_token(monkeypatch):
     async def _create(async_client: AsyncClient, db, app_data: dict, email: str):
         tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
         resp = await async_client.post(
-            f"/api/v1/oauth/transactions/{tx_id}/forgot-password", json={"email": email}
+            f"/api/v1/auth-sessions/{tx_id}/forgot-password", json={"email": email}
         )
         assert resp.status_code == 200
         return tx_id, state["raw"]
@@ -62,12 +62,12 @@ async def test_forgot_password_enumeration_safe(async_client: AsyncClient, db):
         headers={"x-application-id": app_data["client_id"]},
     )
     resp_existing = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/forgot-password", json={"email": email}
+        f"/api/v1/auth-sessions/{tx_id}/forgot-password", json={"email": email}
     )
 
     # Unknown email
     resp_unknown = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/forgot-password",
+        f"/api/v1/auth-sessions/{tx_id}/forgot-password",
         json={"email": "nobody@example.com"},
     )
 
@@ -127,7 +127,7 @@ async def create_application_reset_token(async_client: AsyncClient, db, app_data
     try:
         tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
         resp = await async_client.post(
-            f"/api/v1/oauth/transactions/{tx_id}/forgot-password", json={"email": email}
+            f"/api/v1/auth-sessions/{tx_id}/forgot-password", json={"email": email}
         )
         assert resp.status_code == 200
         return tx_id, sent["raw"]
@@ -155,7 +155,7 @@ async def test_reset_password_completes_transaction_flow(
     tx_id, raw_token = await reset_token(async_client, db, app_data, email)
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/reset-password",
+        f"/api/v1/auth-sessions/{tx_id}/reset-password",
         json={"reset_token": raw_token, "new_password": "newpassword456"},
     )
     assert resp.status_code == 200
@@ -167,7 +167,7 @@ async def test_reset_password_completes_transaction_flow(
 
     # New password works
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/login",
+        f"/api/v1/auth-sessions/{tx_id}/login",
         json={"email": email, "password": "newpassword456"},
     )
     assert resp.status_code == 200
@@ -176,7 +176,7 @@ async def test_reset_password_completes_transaction_flow(
     # Old password no longer works (on a fresh transaction)
     tx2, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx2}/login",
+        f"/api/v1/auth-sessions/{tx2}/login",
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 401
@@ -201,7 +201,7 @@ async def test_reset_password_standalone(async_client: AsyncClient, db, reset_to
     _, raw_token = await reset_token(async_client, db, app_data, email)
 
     resp = await async_client.post(
-        "/api/v1/oauth/password/reset",
+        "/api/v1/auth/password/reset",
         json={"reset_token": raw_token, "new_password": "standalone456"},
     )
     assert resp.status_code == 200
@@ -222,7 +222,7 @@ async def test_reset_password_invalid_token(async_client: AsyncClient, db):
     )
     tx_id, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/reset-password",
+        f"/api/v1/auth-sessions/{tx_id}/reset-password",
         json={"reset_token": "pr_bogus_token_123456", "new_password": "newpassword456"},
     )
     assert resp.status_code == 400
@@ -248,7 +248,7 @@ async def test_reset_password_expired_token(async_client: AsyncClient, db, reset
     )
 
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/reset-password",
+        f"/api/v1/auth-sessions/{tx_id}/reset-password",
         json={"reset_token": raw_token, "new_password": "newpassword456"},
     )
     assert resp.status_code == 400
@@ -277,7 +277,7 @@ async def test_reset_password_wrong_application_token(async_client: AsyncClient,
 
     tx_a, _, _ = await authorize_and_get_transaction(async_client, app_a["client_id"])
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_a}/reset-password",
+        f"/api/v1/auth-sessions/{tx_a}/reset-password",
         json={"reset_token": raw_token, "new_password": "newpassword456"},
     )
     assert resp.status_code == 400
@@ -298,14 +298,14 @@ async def test_reset_password_reused_token_rejected(async_client: AsyncClient, d
     tx_id, raw_token = await reset_token(async_client, db, app_data, email)
 
     first = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/reset-password",
+        f"/api/v1/auth-sessions/{tx_id}/reset-password",
         json={"reset_token": raw_token, "new_password": "newpassword456"},
     )
     assert first.status_code == 200
 
     tx_id2, _, _ = await authorize_and_get_transaction(async_client, app_data["client_id"])
     second = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id2}/reset-password",
+        f"/api/v1/auth-sessions/{tx_id2}/reset-password",
         json={"reset_token": raw_token, "new_password": "anotherpass789"},
     )
     assert second.status_code == 400
@@ -335,7 +335,7 @@ async def test_reset_password_revokes_refresh_tokens(async_client: AsyncClient, 
 
     tx_id, raw_token = await reset_token(async_client, db, app_data, email)
     resp = await async_client.post(
-        f"/api/v1/oauth/transactions/{tx_id}/reset-password",
+        f"/api/v1/auth-sessions/{tx_id}/reset-password",
         json={"reset_token": raw_token, "new_password": "newpassword456"},
     )
     assert resp.status_code == 200

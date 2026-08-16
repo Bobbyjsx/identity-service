@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.repositories.application import ApplicationCredentialRepository, ApplicationRepository
 from app.repositories.authorization_code import AuthorizationCodeRepository
-from app.repositories.oauth_transaction import OAuthTransactionRepository
+from app.repositories.auth_session import AuthSessionRepository
 from app.repositories.permission import PermissionRepository
 from app.repositories.refresh_token import RefreshTokenRepository
 from app.repositories.role import RoleRepository
@@ -32,7 +32,7 @@ def get_oauth_service(db: AsyncClient = Depends(get_db)) -> OAuthService:
         app_service=ApplicationService(ApplicationRepository(db), ApplicationCredentialRepository(db)),
         auth_service=AuthService(UserRepository(db), RefreshTokenRepository(db), ApplicationRepository(db)),
         user_repo=UserRepository(db),
-        tx_repo=OAuthTransactionRepository(db),
+        session_repo=AuthSessionRepository(db),
         code_repo=AuthorizationCodeRepository(db),
         reset_token_repo=OpaqueTokenRepository(db, "password_reset_tokens"),
         verification_token_repo=OpaqueTokenRepository(db, "email_verification_tokens"),

@@ -25,7 +25,7 @@ def generate_authorization_code() -> str:
 class AuthorizationCodeModel(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     code_hash: str
-    transaction_id: str
+    session_id: str
     application_id: str
     client_id: str
     user_id: str
