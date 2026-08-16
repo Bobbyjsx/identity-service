@@ -48,6 +48,8 @@ async def test_application_config_defaults(async_client: AsyncClient):
     assert "redirect_uris" not in config
     assert config["logo_url"] is None
     assert config["primary_color"] is None
+    assert config["themes"] == ["light", "dark"]
+    assert "theme" not in config
 
 
 @pytest.mark.asyncio
@@ -154,3 +156,43 @@ async def test_public_configuration_unknown_client(async_client: AsyncClient):
     resp = await async_client.get("/api/v1/applications/nonexistent/configuration")
     assert resp.status_code == 404
     assert resp.json()["error"] == "invalid_client"
+
+
+@pytest.mark.asyncio
+async def test_application_theme_configuration(async_client: AsyncClient):
+    # App created with explicit light theme
+    app_light = await create_application(
+        async_client,
+        config={"branding": {"themes": ["light"]}},
+    )
+    conf_light = (await async_client.get(f"/api/v1/applications/{app_light['client_id']}/configuration")).json()
+    assert conf_light["themes"] == ["light"]
+    assert "theme" not in conf_light
+
+    # App created with top-level theme alias
+    app_dark = await create_application(
+        async_client,
+        config={"theme": ["dark"]},
+    )
+    conf_dark = (await async_client.get(f"/api/v1/applications/{app_dark['client_id']}/configuration")).json()
+    assert conf_dark["themes"] == ["dark"]
+    assert "theme" not in conf_dark
+
+    # Updating theme via PATCH
+    update_resp = await async_client.patch(
+        f"/api/v1/admin/applications/{app_light['client_id']}/configuration",
+        json={"branding": {"themes": ["dark", "light"]}},
+        headers={"x-admin-token": settings.admin_secret},
+    )
+    assert update_resp.status_code == 200
+    conf_updated = (await async_client.get(f"/api/v1/applications/{app_light['client_id']}/configuration")).json()
+    assert set(conf_updated["themes"]) == {"light", "dark"}
+
+    # Invalid theme rejected
+    bad_resp = await async_client.patch(
+        f"/api/v1/admin/applications/{app_light['client_id']}/configuration",
+        json={"branding": {"themes": ["neon"]}},
+        headers={"x-admin-token": settings.admin_secret},
+    )
+    assert bad_resp.status_code == 422
+

@@ -1,9 +1,9 @@
 import re
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
 
 from app.core.security import validate_redirect_uri
 from app.schemas.enums import StatusEnum
@@ -14,9 +14,12 @@ UNSAFE_TEXT = re.compile(r"[<>]|javascript:", re.IGNORECASE)
 ClientType = Literal["public", "confidential"]
 KNOWN_OAUTH_SCOPES = {"openid", "profile", "email"}
 KNOWN_GRANT_TYPES = {"authorization_code", "client_credentials"}
+KNOWN_THEMES = {"light", "dark"}
+ThemeType = Literal["light", "dark"]
 DEFAULT_ALLOWED_SCOPES = ["openid", "profile", "email"]
 DEFAULT_ALLOWED_GRANTS = ["authorization_code"]
 DEFAULT_CLIENT_TYPE: ClientType = "public"
+DEFAULT_THEMES: list[ThemeType] = ["light", "dark"]
 
 
 def reject_unsafe_text(value: str | None) -> str | None:
@@ -33,6 +36,33 @@ class ApplicationBranding(BaseModel):
     logo_with_text: HttpUrl | None = None
     primary_color: Annotated[str | None, Field(pattern=COLOR_PATTERN)] = None
     secondary_color: Annotated[str | None, Field(pattern=COLOR_PATTERN)] = None
+    themes: list[ThemeType] = Field(default_factory=lambda: list(DEFAULT_THEMES))
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_theme_alias(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if "themes" not in data and "theme" in data:
+                data["themes"] = data.get("theme")
+        return data
+
+    @field_validator("themes", mode="before")
+    @classmethod
+    def validate_themes(cls, value: Any) -> list[str]:
+        if value is None:
+            return list(DEFAULT_THEMES)
+        if isinstance(value, str):
+            value = [value]
+        if isinstance(value, (list, tuple, set)):
+            val_list = [v.strip().lower() if isinstance(v, str) else v for v in value]
+            val_list = list(dict.fromkeys(val_list))
+            if not val_list:
+                return list(DEFAULT_THEMES)
+            for item in val_list:
+                if item not in KNOWN_THEMES:
+                    raise ValueError(f"Invalid theme '{item}'. Must be one or both of 'light' and 'dark'.")
+            return val_list
+        raise ValueError("themes must be a list containing 'light', 'dark', or both")
 
 
 class ApplicationAuthenticationConfig(BaseModel):
@@ -66,6 +96,19 @@ class ApplicationCreate(BaseModel):
     authentication: ApplicationAuthenticationConfig | None = None
     oauth: ApplicationOAuthConfig | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_theme_payload(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key in ("theme", "themes"):
+                if key in data and data[key] is not None:
+                    branding = data.get("branding")
+                    if branding is None:
+                        data["branding"] = {"themes": data[key]}
+                    elif isinstance(branding, dict) and "theme" not in branding and "themes" not in branding:
+                        branding["themes"] = data[key]
+        return data
+
     @field_validator("name", "description")
     @classmethod
     def validate_text(cls, value: str | None) -> str | None:
@@ -97,6 +140,19 @@ class ApplicationConfigUpdate(BaseModel):
     authentication: ApplicationAuthenticationConfig | None = None
     oauth: ApplicationOAuthConfig | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_theme_payload(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for key in ("theme", "themes"):
+                if key in data and data[key] is not None:
+                    branding = data.get("branding")
+                    if branding is None:
+                        data["branding"] = {"themes": data[key]}
+                    elif isinstance(branding, dict) and "theme" not in branding and "themes" not in branding:
+                        branding["themes"] = data[key]
+        return data
+
     @field_validator("name", "description")
     @classmethod
     def validate_text(cls, value: str | None) -> str | None:
@@ -112,6 +168,7 @@ class PublicApplicationConfig(BaseModel):
     logo_with_text: str | None = None
     primary_color: str | None = None
     secondary_color: str | None = None
+    themes: list[str] = Field(default_factory=lambda: list(DEFAULT_THEMES))
     allow_signup: bool
     allow_password_login: bool
     require_email_verification: bool

@@ -27,10 +27,21 @@ from app.schemas.enums import StatusEnum
 def get_app_branding(app: dict[str, Any]) -> dict:
     """Returns application branding with backwards-compatible defaults."""
     branding = app.get("branding") or {}
+    raw_themes = branding.get("themes") or branding.get("theme")
+    if not raw_themes:
+        themes = ["light", "dark"]
+    elif isinstance(raw_themes, str):
+        themes = [raw_themes] if raw_themes in ("light", "dark") else ["light", "dark"]
+    else:
+        themes = [t for t in raw_themes if t in ("light", "dark")]
+        if not themes:
+            themes = ["light", "dark"]
     return {
         "logo_url": branding.get("logo_url"),
+        "logo_with_text": branding.get("logo_with_text"),
         "primary_color": branding.get("primary_color"),
         "secondary_color": branding.get("secondary_color"),
+        "themes": themes,
     }
 
 

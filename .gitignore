@@ -1,6 +1,9 @@
 .venv
 firebase-credentials.json
 .env
+.env.*
+.env*.local
+!.env.example
 .ruff_cache
 .pytest_cache
 __pycache__/
