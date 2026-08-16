@@ -56,7 +56,7 @@ class ResetPasswordRequest(BaseModel):
 
 
 class VerifyEmailRequest(BaseModel):
-    verification_token: Annotated[str, Field(min_length=16, max_length=512)]
+    verification_token: Annotated[str, Field(min_length=6, max_length=512)]
 
 
 class OAuthRedirectResponse(BaseModel):

@@ -23,11 +23,11 @@ class NotificationService:
             body=f"Reset your password by visiting: {reset_url}",
         )
 
-    async def send_verification_email(self, *, to: str, verify_url: str, app_name: str) -> None:
+    async def send_verification_email(self, *, to: str, otp: str, app_name: str) -> None:
         await self.send_email(
             to=to,
             subject=f"{app_name}: verify your email",
-            body=f"Verify your email by visiting: {verify_url}",
+            body=f"Your email verification code is: {otp}\n\nThis code expires in 30 minutes.",
         )
 
 
@@ -35,4 +35,4 @@ class LoggingNotificationService(NotificationService):
     """Development/stub provider that logs instead of delivering email."""
 
     async def send_email(self, *, to: str, subject: str, body: str) -> None:
-        print(f"[NotificationService][dev] to={to} subject={subject}")
+        print(f"[NotificationService][dev] to={to} subject={subject}\n{body}")

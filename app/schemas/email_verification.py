@@ -17,6 +17,8 @@ class EmailVerificationTokenModel(BaseModel):
     app_id: str
     user_id: str
     status: EmailVerificationTokenStatus = EmailVerificationTokenStatus.ACTIVE
+    attempts: int = 0
+    max_attempts: int = 5
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     expires_at: str = Field(
         default_factory=lambda: (

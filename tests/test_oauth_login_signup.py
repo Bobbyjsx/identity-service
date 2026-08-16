@@ -318,7 +318,8 @@ async def test_email_verification_completes_flow(async_client: AsyncClient, db, 
     sent = {}
 
     def generator() -> str:
-        sent["raw"] = f"ev_test_{uuid.uuid4().hex}"
+        import random
+        sent["raw"] = str(random.randint(100000, 999999))
         return sent["raw"]
 
     monkeypatch.setattr(oauth_module, "generate_verification_token", generator)
