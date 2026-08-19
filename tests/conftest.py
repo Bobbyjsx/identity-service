@@ -3,6 +3,11 @@ import hashlib
 import os
 import uuid
 
+# Disable Turnstile verification for the existing suite (settings is
+# instantiated at import time, so this must be set before importing app).
+# Dedicated Turnstile tests re-enable it with a mocked siteverify call.
+os.environ["TURNSTILE_ENABLED"] = "false"
+
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
@@ -69,7 +74,8 @@ async def create_application(
         body["client_type"] = client_type
     if config:
         body.update(config)
-    app_resp = await async_client.post("/api/v1/admin/applications",
+    app_resp = await async_client.post(
+        "/api/v1/admin/applications",
         json=body,
         headers={"x-admin-token": settings.admin_secret},
     )
