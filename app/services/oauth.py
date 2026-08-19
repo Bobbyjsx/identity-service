@@ -570,10 +570,17 @@ class OAuthService:
         token, _ = await self._load_reset_token(reset_token)
         app = await self.resolve_client(token["app_id"])
         
+        redirect_uri = "http://localhost"
+        oauth_config = app.get("oauth", {})
+        if isinstance(oauth_config, dict):
+            redirect_uris = oauth_config.get("redirect_uris", [])
+            if redirect_uris and isinstance(redirect_uris, list):
+                redirect_uri = redirect_uris[0]
+        
         tx = AuthSessionModel(
             application_id=app["id"],
             client_id=app["client_id"],
-            redirect_uri=app.get("default_redirect_uri") or "http://localhost",
+            redirect_uri=redirect_uri,
             response_type="code",
             scopes=[],
             state=None,
