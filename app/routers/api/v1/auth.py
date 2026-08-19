@@ -57,6 +57,19 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 
+from pydantic import BaseModel
+
+
+class ExchangeResetTokenRequest(BaseModel):
+    reset_token: str
+
+@router.post("/password/exchange-reset-token")
+async def exchange_reset_token(
+    body: ExchangeResetTokenRequest,
+    service: OAuthService = Depends(get_oauth_service),
+):
+    return await service.exchange_reset_token_for_session(body.reset_token)
+
 @router.post("/password/reset")
 async def standalone_password_reset(
     body: ResetPasswordRequest,
