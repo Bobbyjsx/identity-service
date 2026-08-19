@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -9,6 +10,8 @@ class UserCreate(BaseModel):
     username: str | None = None
     first_name: str | None = None
     last_name: str | None = None
+    turnstile_token: Annotated[str | None, Field(default=None, max_length=2048)]
+
 
 class UserResponse(BaseModel):
     id: str
@@ -22,6 +25,7 @@ class UserResponse(BaseModel):
     email_verified: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class UserModel(BaseModel):
     app_id: str
