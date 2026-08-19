@@ -15,7 +15,6 @@ from app.repositories.user import UserRepository
 from app.services.application import ApplicationService
 from app.services.auth import AuthService
 from app.services.notifications import LoggingNotificationService, PubSubNotificationService
-from app.core.config import settings
 from app.services.oauth import OAuthService
 from app.services.rbac import RBACService
 

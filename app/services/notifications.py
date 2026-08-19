@@ -24,7 +24,7 @@ class NotificationService:
         )
 
     async def send_welcome_email(self, *, to: str, app_name: str, first_name: str | None = None) -> None:
-        await self.send_email(to=to, subject=f"Welcome to {app_name}", body=f"Welcome!")
+        await self.send_email(to=to, subject=f"Welcome to {app_name}", body="Welcome!")
 
     async def send_verification_email(self, *, to: str, otp: str, app_name: str) -> None:
         await self.send_email(
@@ -42,7 +42,6 @@ class LoggingNotificationService(NotificationService):
 
 import json
 import logging
-import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
