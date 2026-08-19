@@ -41,9 +41,8 @@ class ApplicationBranding(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def handle_theme_alias(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if "themes" not in data and "theme" in data:
-                data["themes"] = data.get("theme")
+        if isinstance(data, dict) and "themes" not in data and "theme" in data:
+            data["themes"] = data.get("theme")
         return data
 
     @field_validator("themes", mode="before")

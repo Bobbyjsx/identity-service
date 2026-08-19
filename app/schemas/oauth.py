@@ -36,6 +36,7 @@ class AuthorizationRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: Annotated[str, Field(max_length=254)]
     password: Annotated[str, Field(max_length=1024)]
+    turnstile_token: Annotated[str | None, Field(default=None, max_length=2048)]
 
 
 class SignupRequest(BaseModel):
@@ -44,19 +45,27 @@ class SignupRequest(BaseModel):
     username: Annotated[str | None, Field(max_length=64)] = None
     first_name: Annotated[str | None, Field(max_length=64)] = None
     last_name: Annotated[str | None, Field(max_length=64)] = None
+    turnstile_token: Annotated[str | None, Field(default=None, max_length=2048)]
 
 
 class ForgotPasswordRequest(BaseModel):
     email: Annotated[str, Field(max_length=254)]
+    turnstile_token: Annotated[str | None, Field(default=None, max_length=2048)]
 
 
 class ResetPasswordRequest(BaseModel):
     reset_token: Annotated[str, Field(min_length=16, max_length=512)]
     new_password: Annotated[str, Field(min_length=8, max_length=1024)]
+    turnstile_token: Annotated[str | None, Field(default=None, max_length=2048)]
 
 
 class VerifyEmailRequest(BaseModel):
     verification_token: Annotated[str, Field(min_length=6, max_length=512)]
+    turnstile_token: Annotated[str | None, Field(default=None, max_length=2048)]
+
+
+class ResendOtpRequest(BaseModel):
+    turnstile_token: Annotated[str | None, Field(default=None, max_length=2048)]
 
 
 class OAuthRedirectResponse(BaseModel):
