@@ -563,6 +563,29 @@ class OAuthService:
         await self.reset_token_repo.mark_used(token["id"], _now_iso())
         await self.auth_service.refresh_token_repo.revoke_user_tokens(user["id"], user["app_id"])
 
+    async def exchange_reset_token_for_session(self, reset_token: str) -> dict[str, Any]:
+        from app.models.auth_session import AuthSessionModel
+
+        from app.core.config import settings
+        
+        token, _ = await self._load_reset_token(reset_token)
+        app = await self.app_service.get_application(token["app_id"])
+        
+        session = AuthSessionModel(
+            client_id=token["app_id"],
+            redirect_uri=app.get("default_redirect_uri") or "http://localhost",
+            response_type="code",
+            scope="",
+            state="",
+            code_challenge="dummy_challenge_for_reset_flow_only",
+            code_challenge_method="S256",
+            status="pending",
+            user_id=token["user_id"],
+            expires_at=(_now() + timedelta(minutes=settings.auth_session_expiration_minutes)).isoformat(),
+        )
+        await self.session_repo.create(session.model_dump(), id=session.session_id)
+        return {"session_id": session.session_id}
+
     async def reset_password(self, session_id: str, reset_token: str, new_password: str) -> dict[str, Any]:
         """
         Session-bound password reset. The session provides application
