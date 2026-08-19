@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     oauth_authorization_code_expiration_minutes: int = 5
     password_reset_token_expiration_minutes: int = 30
 
+    turnstile_secret_key: str = ""
+    turnstile_hostnames: str = "localhost,127.0.0.1"  # comma-separated list
+    turnstile_enabled: bool = True
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
