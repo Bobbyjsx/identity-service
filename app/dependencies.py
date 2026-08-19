@@ -36,7 +36,7 @@ def get_oauth_service(db: AsyncClient = Depends(get_db)) -> OAuthService:
         code_repo=AuthorizationCodeRepository(db),
         reset_token_repo=OpaqueTokenRepository(db, "password_reset_tokens"),
         verification_token_repo=OpaqueTokenRepository(db, "email_verification_tokens"),
-        notifications=PubSubNotificationService(project_id="project-atlas-501612", topic_id="platform-events") if settings.environment == 'production' else LoggingNotificationService(),
+        notifications=PubSubNotificationService(project_id=settings.gcp_project_id, topic_id=settings.pubsub_topic_id) if settings.environment == 'production' else LoggingNotificationService(),
     )
 
 def get_rbac_service(db: AsyncClient = Depends(get_db)) -> RBACService:

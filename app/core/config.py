@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     turnstile_hostnames: str = "localhost,127.0.0.1"  # comma-separated list
     turnstile_enabled: bool = True
 
+    gcp_project_id: str = "project-atlas-501612"
+    pubsub_topic_id: str = "platform-events"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 
