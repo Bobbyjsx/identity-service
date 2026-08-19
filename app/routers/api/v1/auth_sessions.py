@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
+from app.core.turnstile import extract_client_ip, verify_turnstile_token
 from app.dependencies import get_oauth_service
 from app.schemas.auth_session import AuthSessionResponse
 from app.schemas.oauth import (
     ForgotPasswordRequest,
     LoginRequest,
+    ResendOtpRequest,
     ResetPasswordRequest,
     SignupRequest,
     VerifyEmailRequest,
@@ -12,6 +14,7 @@ from app.schemas.oauth import (
 from app.services.oauth import OAuthService
 
 router = APIRouter()
+
 
 @router.get("/{session_id}", response_model=AuthSessionResponse)
 async def load_auth_session(session_id: str, service: OAuthService = Depends(get_oauth_service)):
@@ -28,6 +31,7 @@ async def load_auth_session(session_id: str, service: OAuthService = Depends(get
 async def session_login(
     session_id: str,
     body: LoginRequest,
+    request: Request,
     service: OAuthService = Depends(get_oauth_service),
 ):
     """
@@ -37,6 +41,7 @@ async def session_login(
     returns the callback redirect URL (with a fresh authorization code) or
     signals that email verification is required.
     """
+    await verify_turnstile_token(body.turnstile_token, expected_action="login", client_ip=extract_client_ip(request))
     return await service.login(session_id, body.email, body.password)
 
 
@@ -44,6 +49,7 @@ async def session_login(
 async def session_signup(
     session_id: str,
     body: SignupRequest,
+    request: Request,
     service: OAuthService = Depends(get_oauth_service),
 ):
     """
@@ -52,6 +58,7 @@ async def session_signup(
     Creates the user within the session's application when signup is
     enabled, then proceeds toward authorization-code issuance.
     """
+    await verify_turnstile_token(body.turnstile_token, expected_action="signup", client_ip=extract_client_ip(request))
     return await service.signup(session_id, body)
 
 
@@ -59,11 +66,15 @@ async def session_signup(
 async def session_forgot_password(
     session_id: str,
     body: ForgotPasswordRequest,
+    request: Request,
     service: OAuthService = Depends(get_oauth_service),
 ):
     """
     Session-bound password reset initiation.
     """
+    await verify_turnstile_token(
+        body.turnstile_token, expected_action="forgot-password", client_ip=extract_client_ip(request)
+    )
     return await service.forgot_password(session_id, body.email)
 
 
@@ -71,11 +82,15 @@ async def session_forgot_password(
 async def session_reset_password(
     session_id: str,
     body: ResetPasswordRequest,
+    request: Request,
     service: OAuthService = Depends(get_oauth_service),
 ):
     """
     Session-bound password reset completion.
     """
+    await verify_turnstile_token(
+        body.turnstile_token, expected_action="reset-password", client_ip=extract_client_ip(request)
+    )
     return await service.reset_password(session_id, body.reset_token, body.new_password)
 
 
@@ -83,17 +98,26 @@ async def session_reset_password(
 async def session_verify_email(
     session_id: str,
     body: VerifyEmailRequest,
+    request: Request,
     service: OAuthService = Depends(get_oauth_service),
 ):
     """
     Verifies the email of the user associated with the session and
     proceeds toward authorization-code issuance.
     """
+    await verify_turnstile_token(
+        body.turnstile_token, expected_action="verify-email", client_ip=extract_client_ip(request)
+    )
     return await service.verify_email(session_id, body.verification_token)
 
 
 @router.post("/{session_id}/resend-otp")
-async def session_resend_otp(session_id: str, service: OAuthService = Depends(get_oauth_service)):
+async def session_resend_otp(
+    session_id: str,
+    body: ResendOtpRequest,
+    request: Request,
+    service: OAuthService = Depends(get_oauth_service),
+):
     """
     Resends a fresh OTP to the user's email.
 
@@ -101,6 +125,11 @@ async def session_resend_otp(session_id: str, service: OAuthService = Depends(ge
     Only valid while the session is in the `authenticated` state (user has
     logged in but not yet verified their email).
     """
+    await verify_turnstile_token(
+        body.turnstile_token,
+        expected_action=("verify-email", "resend-otp"),
+        client_ip=extract_client_ip(request),
+    )
     return await service.resend_otp(session_id)
 
 

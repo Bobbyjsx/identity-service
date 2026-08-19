@@ -14,21 +14,21 @@ from app.core.config import settings
 from app.core.errors import OAuthError
 from app.core.security import get_password_hash, hash_token
 from app.repositories.application import ApplicationRepository
-from app.repositories.authorization_code import AuthorizationCodeRepository
 from app.repositories.auth_session import AuthSessionRepository
+from app.repositories.authorization_code import AuthorizationCodeRepository
 from app.repositories.token import OpaqueTokenRepository
 from app.repositories.user import UserRepository
 from app.schemas.application import (
     KNOWN_OAUTH_SCOPES,
     PublicApplicationConfig,
 )
+from app.schemas.auth_session import AuthSessionModel
 from app.schemas.authorization_code import (
     AuthorizationCodeModel,
     generate_authorization_code,
 )
 from app.schemas.email_verification import EmailVerificationTokenModel
 from app.schemas.oauth import AuthorizationRequest, SignupRequest
-from app.schemas.auth_session import AuthSessionModel
 from app.schemas.password_reset import PasswordResetTokenModel
 from app.schemas.user import UserCreate
 from app.services.application import (
