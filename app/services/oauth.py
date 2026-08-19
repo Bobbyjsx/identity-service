@@ -451,6 +451,11 @@ class OAuthService:
         await self.user_repo.collection.document(user["id"]).update({"email_verified": True})
         await self.verification_token_repo.mark_used(token["id"], _now_iso())
 
+        # Send welcome email now that they are verified
+        await self.notifications.send_welcome_email(
+            to=user["email"], app_name=app.get("name", "Application"), app_id=tx["client_id"], first_name=user.get("first_name")
+        )
+
         raw_code = await self.issue_authorization_code(tx, app, user)
         return {"redirect_url": self._build_callback_url(tx, raw_code)}
 
@@ -497,7 +502,7 @@ class OAuthService:
         )
         await self.verification_token_repo.create(token.model_dump(), id=token.id)
         await self.notifications.send_verification_email(
-            to=user["email"], otp=raw_token, app_name=app.get("name", "Application")
+            to=user["email"], otp=raw_token, app_name=app.get("name", "Application"), app_id=tx["client_id"], first_name=user.get("first_name")
         )
 
     # ------------------------------------------------------------------
@@ -525,7 +530,7 @@ class OAuthService:
             await self.reset_token_repo.create(token.model_dump(), id=token.id)
             reset_url = f"{settings.identity_ui_base_url}/reset-password?token={raw_token}"
             await self.notifications.send_password_reset_email(
-                to=user["email"], reset_url=reset_url, app_name=app.get("name", "Application")
+                to=user["email"], reset_url=reset_url, app_name=app.get("name", "Application"), app_id=app.get("client_id") or app.get("id"), first_name=user.get("first_name")
             )
 
         return {"detail": "If the email has an account, a password reset link has been sent."}

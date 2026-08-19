@@ -14,7 +14,8 @@ from app.repositories.token import OpaqueTokenRepository
 from app.repositories.user import UserRepository
 from app.services.application import ApplicationService
 from app.services.auth import AuthService
-from app.services.notifications import LoggingNotificationService
+from app.services.notifications import LoggingNotificationService, PubSubNotificationService
+from app.core.config import settings
 from app.services.oauth import OAuthService
 from app.services.rbac import RBACService
 
@@ -36,7 +37,7 @@ def get_oauth_service(db: AsyncClient = Depends(get_db)) -> OAuthService:
         code_repo=AuthorizationCodeRepository(db),
         reset_token_repo=OpaqueTokenRepository(db, "password_reset_tokens"),
         verification_token_repo=OpaqueTokenRepository(db, "email_verification_tokens"),
-        notifications=LoggingNotificationService(),
+        notifications=PubSubNotificationService(project_id="project-atlas-501612", topic_id="platform-events") if settings.environment == 'production' else LoggingNotificationService(),
     )
 
 def get_rbac_service(db: AsyncClient = Depends(get_db)) -> RBACService:
