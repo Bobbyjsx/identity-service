@@ -4,6 +4,7 @@ jobs:
   test:
     machine:
       image: ubuntu-2204:default
+    resource_class: medium
     steps:
       - checkout
       - run:
