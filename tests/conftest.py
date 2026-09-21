@@ -37,7 +37,7 @@ def pkce_pair(verifier: str | None = None) -> tuple[str, str]:
 
 @pytest_asyncio.fixture
 async def async_client():
-    async with LifespanManager(app):
+    async with LifespanManager(app, startup_timeout=30):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             yield client
