@@ -2,9 +2,12 @@ version: 2.1
 
 jobs:
   test:
-    machine:
-      image: ubuntu-2204:default
-    resource_class: medium
+    docker:
+      - image: cimg/python:3.12
+      - image: google/cloud-sdk:latest
+        command: ["gcloud", "beta", "emulators", "firestore", "start", "--host-port=0.0.0.0:8080"]
+        environment:
+          FIRESTORE_PROJECT_ID: test-project
     steps:
       - checkout
       - run:
@@ -24,6 +27,18 @@ jobs:
           key: v1-uv-cache-{{ checksum "uv.lock" }}
           paths:
             - ~/.cache/uv
+      - run:
+          name: Wait for Firestore Emulator
+          command: |
+            for i in $(seq 1 30); do
+              if nc -z 127.0.0.1 8080 2>/dev/null || curl -s http://127.0.0.1:8080/ >/dev/null 2>&1; then
+                echo "Firestore emulator is ready!"
+                exit 0
+              fi
+              sleep 1
+            done
+            echo "Timeout waiting for emulator"
+            exit 1
       - run:
           name: Run Tests
           command: |
