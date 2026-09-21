@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from app.core.config import settings
 from app.schemas.application import KNOWN_GRANT_TYPES, KNOWN_OAUTH_SCOPES
@@ -8,20 +8,22 @@ router = APIRouter()
 
 
 @router.get("/.well-known/jwks.json")
-async def get_jwks():
+async def get_jwks(response: Response):
     """
     Standard JWKS endpoint exposing active public keys for
     downstream microservices to verify JWT signatures statelessly.
     """
+    response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=86400"
     return await key_manager.get_jwks()
 
 
 @router.get("/.well-known/openid-configuration")
-async def get_openid_configuration():
+async def get_openid_configuration(response: Response):
     """
     OpenID Connect discovery document. Only advertises what this service
     actually implements.
     """
+    response.headers["Cache-Control"] = "public, max-age=300, stale-while-revalidate=86400"
     base = settings.public_base_url.rstrip("/")
     return {
         "issuer": settings.identity_issuer,

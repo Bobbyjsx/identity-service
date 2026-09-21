@@ -1,8 +1,18 @@
+import os
 from urllib.parse import urlparse
 
 from passlib.context import CryptContext
 
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+if os.environ.get("ENVIRONMENT") in {"test", "testing"} or os.environ.get("IDENTITY_ENVIRONMENT") in {"test", "testing"}:
+    pwd_context = CryptContext(
+        schemes=["argon2"],
+        deprecated="auto",
+        argon2__time_cost=1,
+        argon2__memory_cost=512,
+        argon2__parallelism=1,
+    )
+else:
+    pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "[::1]", "::1"}
 DANGEROUS_SCHEMES = {"javascript", "data", "file", "vbscript", "blob"}

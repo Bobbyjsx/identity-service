@@ -20,5 +20,5 @@ COPY . .
 # Pre-compile Python bytecode to speed up cold-start module loading
 RUN python -m compileall -q /app
 
-# Run Uvicorn. PORT is injected by Cloud Run or docker-compose/env.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001}"]
+# Run Uvicorn. PORT and WEB_CONCURRENCY can be injected by environment.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --workers ${WEB_CONCURRENCY:-2}"]

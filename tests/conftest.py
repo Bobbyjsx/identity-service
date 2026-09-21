@@ -3,21 +3,18 @@ import hashlib
 import os
 import uuid
 
-# Disable Turnstile verification for the existing suite (settings is
-# instantiated at import time, so this must be set before importing app).
-# Dedicated Turnstile tests re-enable it with a mocked siteverify call.
+# Set testing environment flags before importing app or settings
+os.environ["ENVIRONMENT"] = "testing"
+os.environ["IDENTITY_ENVIRONMENT"] = "testing"
 os.environ["TURNSTILE_ENABLED"] = "false"
+os.environ["FIRESTORE_EMULATOR_HOST"] = "127.0.0.1:8080"
+os.environ["GOOGLE_CLOUD_PROJECT"] = "test-project"
 
 import pytest_asyncio
 from asgi_lifespan import LifespanManager
 from httpx import ASGITransport, AsyncClient
 
 from app.main import app
-
-# Force Firestore to use the emulator
-os.environ["FIRESTORE_EMULATOR_HOST"] = "127.0.0.1:8080"
-os.environ["GOOGLE_CLOUD_PROJECT"] = "test-project"
-os.environ["IDENTITY_ENVIRONMENT"] = "development"
 
 REDIRECT_URI = "https://app.example.com/callback"
 CLIENT_CREDENTIALS_OAUTH = {
