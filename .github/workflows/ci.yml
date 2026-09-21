@@ -62,6 +62,15 @@ jobs:
           cp -n .env.example .env || true
 
       - name: Run Tests
+        env:
+          FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
+          GOOGLE_CLOUD_PROJECT: "test-project"
+          FIRESTORE_DATABASE: "(default)"
+          STORAGE_BACKEND: "local"
+          PYTHONPATH: "."
+          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          FIREBASE_CREDENTIALS: ${{ secrets.FIREBASE_CREDENTIALS }}
         run: |
           make test
 

@@ -16,17 +16,40 @@ class NotificationService:
             "NotificationService.send_email must be implemented by a provider"
         )
 
-    async def send_password_reset_email(self, *, to: str, reset_url: str, app_name: str) -> None:
+    async def send_password_reset_email(
+        self,
+        *,
+        to: str,
+        reset_url: str,
+        app_name: str,
+        app_id: str | None = None,
+        first_name: str | None = None,
+    ) -> None:
         await self.send_email(
             to=to,
             subject=f"{app_name}: reset your password",
             body=f"Reset your password by visiting: {reset_url}",
         )
 
-    async def send_welcome_email(self, *, to: str, app_name: str, first_name: str | None = None) -> None:
+    async def send_welcome_email(
+        self,
+        *,
+        to: str,
+        app_name: str,
+        app_id: str | None = None,
+        first_name: str | None = None,
+    ) -> None:
         await self.send_email(to=to, subject=f"Welcome to {app_name}", body="Welcome!")
 
-    async def send_verification_email(self, *, to: str, otp: str, app_name: str) -> None:
+    async def send_verification_email(
+        self,
+        *,
+        to: str,
+        otp: str,
+        app_name: str,
+        app_id: str | None = None,
+        first_name: str | None = None,
+    ) -> None:
         await self.send_email(
             to=to,
             subject=f"{app_name}: verify your email",

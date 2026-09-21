@@ -241,9 +241,9 @@ async def test_id_token_signature_verifies_with_jwks(async_client: AsyncClient):
     ).json()
 
     jwks = (await async_client.get("/.well-known/jwks.json")).json()
-    jwk = jwks["keys"][0]
     kid = jwt.get_unverified_header(data["id_token"])["kid"]
-    assert kid == jwk["kid"]
+    jwk = next((k for k in jwks["keys"] if k["kid"] == kid), None)
+    assert jwk is not None, f"Key {kid} not found in JWKS"
 
     key = jwt.algorithms.get_default_algorithms()["EdDSA"].from_jwk(jwk)
     payload = jwt.decode(
