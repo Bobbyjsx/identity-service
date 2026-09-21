@@ -1,28 +1,41 @@
 .PHONY: install run lint format test clean
 
-VENV = .venv/bin
-
 install:
-	$(VENV)/pip install -r requirements.txt
+	uv sync
 
 run:
 	docker compose up --build --watch identity-service
 	docker image prune -f
 
 lint:
-	$(VENV)/ruff check .
+	uv run ruff check .
 
 lint-fix:
-	$(VENV)/ruff check . --fix
+	uv run ruff check . --fix
 
 format:
-	$(VENV)/ruff format .
+	uv run ruff format .
 
 test:
-	docker compose up --build -d firestore
-	sleep 5
-	PYTHONPATH=. $(VENV)/pytest tests/ || (docker compose down && exit 1)
-	docker compose down
+	@if ! nc -z 127.0.0.1 8080 2>/dev/null && ! curl -s http://127.0.0.1:8080/ >/dev/null 2>&1; then \
+		echo "Starting Firestore emulator..."; \
+		docker compose up -d firestore; \
+		echo "Waiting for Firestore emulator to be ready..."; \
+		for i in $$(seq 1 30); do \
+			if nc -z 127.0.0.1 8080 2>/dev/null || curl -s http://127.0.0.1:8080/ >/dev/null 2>&1; then \
+				echo "Firestore emulator is ready!"; \
+				break; \
+			fi; \
+			sleep 1; \
+		done; \
+		STOP_EMULATOR=1; \
+	fi; \
+	PYTHONPATH=. uv run pytest tests/ -v; \
+	STATUS=$$?; \
+	if [ "$$STOP_EMULATOR" = "1" ]; then \
+		docker compose down; \
+	fi; \
+	exit $$STATUS
 
 clean:
 	rm -rf __pycache__
