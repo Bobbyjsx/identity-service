@@ -65,10 +65,12 @@ jobs:
           name: Set Environment Variables
           command: |
             echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
-            echo "export SERVICE_NAME=identity-service" >> "$BASH_ENV"
+            echo "export SERVICE_NAME=identity-service-staging" >> "$BASH_ENV"
             echo "export IMAGE_NAME=identity-service" >> "$BASH_ENV"
             echo "export REGISTRY_IMAGE=gcr.io/${GCP_PROJECT_ID}/identity-service" >> "$BASH_ENV"
-            echo "export ENV_DECLARATION_FILE=.env.example" >> "$BASH_ENV"
+            echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
+            echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
+            echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
             # deploy-ops uses these to authenticate
             echo "export REGISTRY_USERNAME=_json_key" >> "$BASH_ENV"
             echo "export REGISTRY_PASSWORD=$(echo \"$GCP_SERVICE_KEY\" | base64 -d)" >> "$BASH_ENV"
