@@ -44,6 +44,7 @@ def get_db_client() -> AsyncClient:
     google_creds = None
     if settings.firebase_credentials_json:
         import json
+
         from google.oauth2 import service_account
         cred_dict = json.loads(settings.firebase_credentials_json)
         google_creds = service_account.Credentials.from_service_account_info(cred_dict)
