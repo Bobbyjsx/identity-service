@@ -40,7 +40,15 @@ def get_db_client() -> AsyncClient:
             project_id = cred.project_id
 
     database = settings.firestore_database or "(default)"
-    return AsyncClient(project=project_id, database=database)
+    
+    google_creds = None
+    if settings.firebase_credentials_json:
+        import json
+        from google.oauth2 import service_account
+        cred_dict = json.loads(settings.firebase_credentials_json)
+        google_creds = service_account.Credentials.from_service_account_info(cred_dict)
+        
+    return AsyncClient(project=project_id, database=database, credentials=google_creds)
 
 def get_db(request: Request) -> AsyncClient:
     """Dependency that returns an Async Firestore client from app state."""
