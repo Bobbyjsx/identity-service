@@ -18,6 +18,11 @@ def init_db():
         if settings.google_application_credentials and os.path.exists(settings.google_application_credentials):
             cred = credentials.Certificate(settings.google_application_credentials)
             firebase_admin.initialize_app(cred)
+        elif settings.firebase_credentials_json:
+            import json
+            cred_dict = json.loads(settings.firebase_credentials_json)
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
         else:
             firebase_admin.initialize_app()
     print("Firebase Admin initialized successfully.")
