@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     firestore_database: str = "(default)"
     google_application_credentials: str = "firebase-credentials.json"
+    firebase_credentials_json: str | None = None
 
     admin_secret: str = "changeme-in-prod"
     # Canonical issuer for access tokens, service tokens, ID tokens, and OIDC discovery.
