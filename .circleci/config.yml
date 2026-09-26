@@ -71,9 +71,6 @@ jobs:
             echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
             echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
             echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
-            # deploy-ops uses these to authenticate
-            echo "export REGISTRY_USERNAME=_json_key" >> "$BASH_ENV"
-            echo "export REGISTRY_PASSWORD=$(echo \"$GCP_SERVICE_KEY\" | base64 -d)" >> "$BASH_ENV"
       - run:
           name: Clone deploy-ops
           command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
