@@ -8,25 +8,31 @@ jobs:
         command: ["gcloud", "beta", "emulators", "firestore", "start", "--host-port=0.0.0.0:8080"]
         environment:
           FIRESTORE_PROJECT_ID: test-project
+
     steps:
       - checkout
+
       - run:
           name: Install uv
           command: |
             curl -LsSf https://astral.sh/uv/install.sh | sh
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+
       - restore_cache:
           keys:
             - v1-uv-cache-{{ checksum "uv.lock" }}
             - v1-uv-cache-
+
       - run:
           name: Sync Dependencies with uv
           command: |
             uv sync --frozen
+
       - save_cache:
           key: v1-uv-cache-{{ checksum "uv.lock" }}
           paths:
             - ~/.cache/uv
+
       - run:
           name: Wait for Firestore Emulator
           command: |
@@ -39,13 +45,14 @@ jobs:
             done
             echo "Timeout waiting for emulator"
             exit 1
+
       - run:
           name: Run Tests
           command: |
             cp -n .env.example .env || true
             make test
 
-  build-and-push:
+  deploy-staging:
     docker:
       - image: cimg/base:current
     steps:
@@ -54,69 +61,35 @@ jobs:
           version: default
           docker_layer_caching: true
       - run:
-          name: Authenticate with Google Container Registry
+          name: Set Environment Variables
           command: |
-            echo "$GCP_SERVICE_KEY" | base64 -d | docker login -u _json_key --password-stdin https://gcr.io
+            echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
+            echo "export SERVICE_NAME=identity-service-staging" >> "$BASH_ENV"
+            # Explicitly set IMAGE_NAME to push to the same Artifact Registry repo
+            echo "export IMAGE_NAME=identity-service" >> "$BASH_ENV"
+            echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
+            echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
+            echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
       - run:
-          name: Build and Push Docker Image
-          command: |
-            IMAGE_BASE="gcr.io/${GCP_PROJECT_ID}/identity-service"
-            docker build \
-              -t "${IMAGE_BASE}:latest" \
-              -t "${IMAGE_BASE}:${CIRCLE_SHA1}" \
-              .
-            docker push "${IMAGE_BASE}:latest"
-            docker push "${IMAGE_BASE}:${CIRCLE_SHA1}"
-
-  trigger-deploy:
-    docker:
-      - image: cimg/base:current
-    steps:
+          name: Clone deploy-ops
+          command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
       - run:
-          name: Trigger Secure Container Deployment Webhook
+          name: Build and Deploy
           command: |
-            # Call deployment webhook with per-container secret header.
-            # If the secret is invalid or missing, server returns 401 Unauthorized and performs no action.
-            HTTP_RESPONSE=$(curl -s -o /tmp/webhook_response.json -w "%{http_code}" \
-              -X POST \
-              -H "X-Webhook-Secret: ${DEPLOY_WEBHOOK_SECRET}" \
-              "${DEPLOY_WEBHOOK_URL}")
-
-            cat /tmp/webhook_response.json || true
-            echo ""
-
-            if [ "$HTTP_RESPONSE" -eq 200 ] || [ "$HTTP_RESPONSE" -eq 204 ]; then
-              echo "Deployment webhook successfully accepted (HTTP $HTTP_RESPONSE)."
-            else
-              echo "Deployment webhook failed with HTTP $HTTP_RESPONSE."
-              exit 1
-            fi
+            cd deploy-ops
+            make build
+            make deploy
 
 workflows:
   version: 2
   build-and-deploy:
     jobs:
       - test:
-          filters:
-            branches:
-              only:
-                - main
-                - master
-      - build-and-push:
-          context: identity-service
+          context:
+            - identity-service
+      - deploy-staging:
           requires:
             - test
-          filters:
-            branches:
-              only:
-                - main
-                - master
-      - trigger-deploy:
-          context: identity-service
-          requires:
-            - build-and-push
-          filters:
-            branches:
-              only:
-                - main
-                - master
+          context:
+            - identity-service
+            - deploy-ops
