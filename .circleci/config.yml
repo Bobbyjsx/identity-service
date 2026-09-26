@@ -121,7 +121,6 @@ jobs:
             sudo tailscale up \
               --authkey="${TAILSCALE_AUTH_KEY}" \
               --hostname="circleci-deploy-test" \
-              --ephemeral
 
       - run:
           name: Verify Tailnet
