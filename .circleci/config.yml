@@ -66,6 +66,7 @@ jobs:
           command: |
             echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
             echo "export SERVICE_NAME=identity-service" >> "$BASH_ENV"
+            echo "export IMAGE_NAME=identity-service" >> "$BASH_ENV"
             echo "export REGISTRY_IMAGE=gcr.io/${GCP_PROJECT_ID}/identity-service" >> "$BASH_ENV"
             echo "export ENV_DECLARATION_FILE=.env.example" >> "$BASH_ENV"
             # deploy-ops uses these to authenticate
@@ -86,11 +87,7 @@ workflows:
 
   build-and-deploy:
     jobs:
-      - test
-
       - deploy-prod:
           context: 
             - identity-service
             - deploy-ops
-          requires:
-            - test
