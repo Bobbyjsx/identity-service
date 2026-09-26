@@ -52,6 +52,32 @@ jobs:
             cp -n .env.example .env || true
             make test
 
+  deploy-production:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: default
+          docker_layer_caching: true
+      - run:
+          name: Set Environment Variables
+          command: |
+            echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
+            echo "export SERVICE_NAME=identity-service-production" >> "$BASH_ENV"
+            echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
+            echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
+            echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
+      - run:
+          name: Clone deploy-ops
+          command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
+      - run:
+          name: Build and Deploy
+          command: |
+            cd deploy-ops
+            make build
+            make deploy
+
   deploy-staging:
     docker:
       - image: cimg/base:current
@@ -65,8 +91,6 @@ jobs:
           command: |
             echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
             echo "export SERVICE_NAME=identity-service-staging" >> "$BASH_ENV"
-            # Explicitly set IMAGE_NAME to push to the same Artifact Registry repo
-            echo "export IMAGE_NAME=identity-service" >> "$BASH_ENV"
             echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
             echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
             echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
@@ -82,14 +106,26 @@ jobs:
 
 workflows:
   version: 2
-  build-and-deploy:
+  build-and-deploy-production:
     jobs:
       - test:
           context:
             - identity-service
-      - deploy-staging:
+      - deploy-production:
           requires:
             - test
           context:
             - identity-service
             - deploy-ops
+
+  build-and-deploy-staging:
+    jobs:
+      - test:
+          context:
+            - identity-service-staging
+      - deploy-staging:
+          requires:
+            - test
+          context:
+            - identity-service-staging
+            - deploy-ops-staging
