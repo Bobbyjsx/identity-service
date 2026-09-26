@@ -86,12 +86,7 @@ workflows:
 
   build-and-deploy:
     jobs:
-      - test:
-          filters:
-            branches:
-              only:
-                - main
-                - master
+      - test
 
       - deploy-prod:
           context: 
@@ -99,8 +94,3 @@ workflows:
             - deploy-ops
           requires:
             - test
-          filters:
-            branches:
-              only:
-                - main
-                - master
