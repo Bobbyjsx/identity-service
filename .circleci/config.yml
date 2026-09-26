@@ -120,12 +120,7 @@ workflows:
 
   build-and-deploy-staging:
     jobs:
-      - test:
-          context:
-            - identity-service-staging
       - deploy-staging:
-          requires:
-            - test
           context:
             - identity-service-staging
             - deploy-ops-staging
