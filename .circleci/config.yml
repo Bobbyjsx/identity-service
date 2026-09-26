@@ -166,8 +166,3 @@ workflows:
       - tailscale-test:
           context:
             - deploy-ops
-          filters:
-            branches:
-              only:
-                - main
-                - master
