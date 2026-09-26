@@ -94,6 +94,8 @@ jobs:
             echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
             echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
             echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
+            echo "export HOST_PORT=8001" >> "$BASH_ENV"
+            echo "export CONTAINER_PORT=8001" >> "$BASH_ENV"
       - run:
           name: Clone deploy-ops
           command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
