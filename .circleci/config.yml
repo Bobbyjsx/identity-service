@@ -53,7 +53,7 @@ jobs:
             cp -n .env.example .env || true
             make test
 
-  deploy-prod:
+  deploy-staging:
     docker:
       - image: cimg/base:current
     steps:
@@ -66,8 +66,8 @@ jobs:
           command: |
             echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
             echo "export SERVICE_NAME=identity-service-staging" >> "$BASH_ENV"
+            # Explicitly set IMAGE_NAME to push to the same Artifact Registry repo
             echo "export IMAGE_NAME=identity-service" >> "$BASH_ENV"
-            echo "export REGISTRY_IMAGE=gcr.io/${GCP_PROJECT_ID}/identity-service" >> "$BASH_ENV"
             echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
             echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
             echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
@@ -83,10 +83,14 @@ jobs:
 
 workflows:
   version: 2
-
   build-and-deploy:
     jobs:
-      - deploy-prod:
-          context: 
+      - test:
+          context:
+            - identity-service
+      - deploy-staging:
+          requires:
+            - test
+          context:
             - identity-service
             - deploy-ops
