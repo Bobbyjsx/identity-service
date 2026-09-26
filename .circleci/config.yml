@@ -113,12 +113,22 @@ workflows:
       - test:
           context:
             - identity-service
+          filters:
+            branches:
+              only:
+                - main
+                - master
       - deploy-production:
           requires:
             - test
           context:
             - identity-service
             - deploy-ops
+          filters:
+            branches:
+              only:
+                - main
+                - master
 
   build-and-deploy-staging:
     jobs:
@@ -126,3 +136,7 @@ workflows:
           context:
             - identity-service-staging
             - deploy-ops-staging
+          filters:
+            branches:
+              only:
+                - staging
