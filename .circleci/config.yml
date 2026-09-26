@@ -53,80 +53,33 @@ jobs:
             cp -n .env.example .env || true
             make test
 
-  build-and-push:
+  deploy-prod:
     docker:
       - image: cimg/base:current
-
     steps:
       - checkout
-
       - setup_remote_docker:
           version: default
           docker_layer_caching: true
-
       - run:
-          name: Authenticate with Google Container Registry
+          name: Set Environment Variables
           command: |
-            echo "$GCP_SERVICE_KEY" | base64 -d | docker login -u _json_key --password-stdin https://gcr.io
-
+            echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
+            echo "export SERVICE_NAME=identity-service" >> "$BASH_ENV"
+            echo "export REGISTRY_IMAGE=gcr.io/${GCP_PROJECT_ID}/identity-service" >> "$BASH_ENV"
+            echo "export ENV_DECLARATION_FILE=.env.example" >> "$BASH_ENV"
+            # deploy-ops uses these to authenticate
+            echo "export REGISTRY_USERNAME=_json_key" >> "$BASH_ENV"
+            echo "export REGISTRY_PASSWORD=$(echo \"$GCP_SERVICE_KEY\" | base64 -d)" >> "$BASH_ENV"
       - run:
-          name: Build and Push Docker Image
-          command: |
-            IMAGE_BASE="gcr.io/${GCP_PROJECT_ID}/identity-service"
-
-            docker build \
-              -t "${IMAGE_BASE}:latest" \
-              -t "${IMAGE_BASE}:${CIRCLE_SHA1}" \
-              .
-
-            docker push "${IMAGE_BASE}:latest"
-            docker push "${IMAGE_BASE}:${CIRCLE_SHA1}"
-
-  trigger-deploy:
-    docker:
-      - image: cimg/base:current
-
-    steps:
+          name: Clone deploy-ops
+          command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
       - run:
-          name: Trigger Secure Container Deployment Webhook
+          name: Build and Deploy
           command: |
-            HTTP_RESPONSE=$(curl -s -o /tmp/webhook_response.json -w "%{http_code}" \
-              -X POST \
-              -H "X-Webhook-Secret: ${DEPLOY_WEBHOOK_SECRET}" \
-              "${DEPLOY_WEBHOOK_URL}")
-
-            cat /tmp/webhook_response.json || true
-            echo ""
-
-            if [ "$HTTP_RESPONSE" -eq 200 ] || [ "$HTTP_RESPONSE" -eq 204 ]; then
-              echo "Deployment webhook successfully accepted (HTTP $HTTP_RESPONSE)."
-            else
-              echo "Deployment webhook failed with HTTP $HTTP_RESPONSE."
-              exit 1
-            fi
-
-  tailscale-test:
-    docker:
-      - image: cimg/base:current
-
-    steps:
-      - run:
-          name: Install Tailscale
-          command: |
-            curl -fsSL https://tailscale.com/install.sh | sh
-
-      - run:
-          name: Join Tailnet
-          command: |
-            sudo tailscale up \
-              --authkey="${TAILSCALE_AUTH_KEY}" \
-              --hostname="circleci-deploy-test" \
-
-      - run:
-          name: Verify Tailnet
-          command: |
-            tailscale status
-            tailscale ip
+            cd deploy-ops
+            make build
+            make deploy
 
 workflows:
   version: 2
@@ -140,8 +93,10 @@ workflows:
                 - main
                 - master
 
-      - build-and-push:
-          context: identity-service
+      - deploy-prod:
+          context: 
+            - identity-service
+            - deploy-ops
           requires:
             - test
           filters:
@@ -149,19 +104,3 @@ workflows:
               only:
                 - main
                 - master
-
-      - trigger-deploy:
-          context: identity-service
-          requires:
-            - build-and-push
-          filters:
-            branches:
-              only:
-                - main
-                - master
-
-  tailscale-test:
-    jobs:
-      - tailscale-test:
-          context:
-            - deploy-ops
