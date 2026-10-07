@@ -21,6 +21,10 @@ func (s *Server) OAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 	if codeChallengeMethod == "" {
 		codeChallengeMethod = "S256"
 	}
+	if codeChallengeMethod != "S256" {
+		core.WriteValidationError(w, "only the S256 code challenge method is supported")
+		return
+	}
 
 	if clientID == "" || redirectURI == "" || codeChallenge == "" {
 		core.WriteValidationError(w, "client_id, redirect_uri, and code_challenge are required")
