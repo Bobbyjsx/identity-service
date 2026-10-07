@@ -3,7 +3,7 @@ version: 2.1
 jobs:
   test:
     docker:
-      - image: cimg/python:3.12
+      - image: cimg/go:1.24
       - image: google/cloud-sdk:latest
         command: ["gcloud", "beta", "emulators", "firestore", "start", "--host-port=0.0.0.0:8080"]
         environment:
@@ -12,26 +12,19 @@ jobs:
     steps:
       - checkout
 
-      - run:
-          name: Install uv
-          command: |
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-
       - restore_cache:
           keys:
-            - v1-uv-cache-{{ checksum "uv.lock" }}
-            - v1-uv-cache-
+            - go-mod-v1-{{ checksum "go.sum" }}
+            - go-mod-v1-
 
       - run:
-          name: Sync Dependencies with uv
-          command: |
-            uv sync --frozen
+          name: Download Go Modules
+          command: go mod download
 
       - save_cache:
-          key: v1-uv-cache-{{ checksum "uv.lock" }}
+          key: go-mod-v1-{{ checksum "go.sum" }}
           paths:
-            - ~/.cache/uv
+            - "/go/pkg/mod"
 
       - run:
           name: Wait for Firestore Emulator
