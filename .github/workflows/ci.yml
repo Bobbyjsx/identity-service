@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - main
+      - staging
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
@@ -14,26 +15,20 @@ concurrency:
 
 jobs:
   lint:
-    name: Code Quality & Style
+    name: Code Quality & Vet
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          version: "latest"
-          enable-cache: true
+          go-version: 'stable'
+          cache: true
 
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Run Linter
+      - name: Run Linter / Vet
         run: |
           make lint
 
@@ -45,32 +40,18 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          version: "latest"
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Install dependencies
-        run: uv sync --frozen
-
-      - name: Set up Environment
-        run: |
-          cp -n .env.example .env || true
+          go-version: 'stable'
+          cache: true
 
       - name: Run Tests
         env:
           FIRESTORE_EMULATOR_HOST: "127.0.0.1:8080"
           GOOGLE_CLOUD_PROJECT: "test-project"
           FIRESTORE_DATABASE: "(default)"
-          STORAGE_BACKEND: "local"
-          PYTHONPATH: "."
-          ADMIN_SECRET: ${{ secrets.ADMIN_SECRET }}
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          FIREBASE_CREDENTIALS: ${{ secrets.FIREBASE_CREDENTIALS }}
+          ENVIRONMENT: "testing"
         run: |
           make test
 

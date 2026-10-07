@@ -1,4 +1,3 @@
-
 services:
   firestore:
     image: google/cloud-sdk:latest
@@ -18,19 +17,10 @@ services:
     ports:
       - "8002:8002"
     environment:
+      PORT: "8002"
       GOOGLE_APPLICATION_CREDENTIALS: /app/firebase-credentials.json
       FIREBASE_CREDENTIALS_PATH: /app/firebase-credentials.json
     env_file:
       - .env
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload
     volumes:
       - ./firebase-credentials.json:/app/firebase-credentials.json:ro
-    develop:
-      watch:
-        - action: sync
-          path: ./app
-          target: /app/app
-        - action: rebuild
-          path: requirements.txt
-        - action: rebuild
-          path: Dockerfile
