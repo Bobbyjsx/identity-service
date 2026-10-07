@@ -31,15 +31,21 @@ func NewApplicationService(db *firestore.Client) *ApplicationService {
 	return &ApplicationService{db: db}
 }
 
+type ApplicationAuthenticationRequest struct {
+	AllowSignup              *bool `json:"allow_signup"`
+	AllowPasswordLogin       *bool `json:"allow_password_login"`
+	RequireEmailVerification *bool `json:"require_email_verification"`
+}
+
 type ApplicationCreateRequest struct {
-	Name           string                                  `json:"name"`
-	Description    *string                                 `json:"description"`
-	ClientType     string                                  `json:"client_type"`
-	Branding       *models.ApplicationBranding             `json:"branding"`
-	Authentication *models.ApplicationAuthenticationConfig `json:"authentication"`
-	OAuth          *models.ApplicationOAuthConfig          `json:"oauth"`
-	Theme          interface{}                             `json:"theme"`
-	Themes         interface{}                             `json:"themes"`
+	Name           string                            `json:"name"`
+	Description    *string                           `json:"description"`
+	ClientType     string                            `json:"client_type"`
+	Branding       *models.ApplicationBranding       `json:"branding"`
+	Authentication *ApplicationAuthenticationRequest `json:"authentication"`
+	OAuth          *models.ApplicationOAuthConfig    `json:"oauth"`
+	Theme          interface{}                       `json:"theme"`
+	Themes         interface{}                       `json:"themes"`
 }
 
 func GenerateSecureToken(byteLen int) string {
@@ -132,7 +138,15 @@ func (s *ApplicationService) RegisterApplication(ctx context.Context, req Applic
 		RequireEmailVerification: false,
 	}
 	if req.Authentication != nil {
-		authConfig = *req.Authentication
+		if req.Authentication.AllowSignup != nil {
+			authConfig.AllowSignup = *req.Authentication.AllowSignup
+		}
+		if req.Authentication.AllowPasswordLogin != nil {
+			authConfig.AllowPasswordLogin = *req.Authentication.AllowPasswordLogin
+		}
+		if req.Authentication.RequireEmailVerification != nil {
+			authConfig.RequireEmailVerification = *req.Authentication.RequireEmailVerification
+		}
 	}
 
 	oauthConfig := models.ApplicationOAuthConfig{
@@ -245,10 +259,12 @@ func (s *ApplicationService) GetByClientID(ctx context.Context, clientID string)
 	}
 
 	var app models.Application
+	data := doc.Data()
 	if err := doc.DataTo(&app); err != nil {
 		return nil, err
 	}
 	app.ID = doc.Ref.ID
+	applyApplicationDefaults(data, &app)
 	return &app, nil
 }
 
@@ -258,11 +274,35 @@ func (s *ApplicationService) GetByID(ctx context.Context, appID string) (*models
 		return nil, nil
 	}
 	var app models.Application
+	data := doc.Data()
 	if err := doc.DataTo(&app); err != nil {
 		return nil, err
 	}
 	app.ID = doc.Ref.ID
+	applyApplicationDefaults(data, &app)
 	return &app, nil
+}
+
+func applyApplicationDefaults(data map[string]interface{}, app *models.Application) {
+	if authMap, ok := data["authentication"].(map[string]interface{}); ok {
+		if val, has := authMap["allow_signup"]; !has || val == nil {
+			app.Authentication.AllowSignup = true
+		}
+		if val, has := authMap["allow_password_login"]; !has || val == nil {
+			app.Authentication.AllowPasswordLogin = true
+		}
+	} else {
+		app.Authentication.AllowSignup = true
+		app.Authentication.AllowPasswordLogin = true
+	}
+
+	if oauthMap, ok := data["oauth"].(map[string]interface{}); ok {
+		if val, has := oauthMap["allowed_scopes"]; !has || val == nil || len(app.OAuth.AllowedScopes) == 0 {
+			app.OAuth.AllowedScopes = []string{"openid", "profile", "email"}
+		}
+	} else {
+		app.OAuth.AllowedScopes = []string{"openid", "profile", "email"}
+	}
 }
 
 func (s *ApplicationService) UpdateApplicationConfig(ctx context.Context, clientID string, updates map[string]interface{}) (*models.Application, error) {

@@ -12,7 +12,7 @@ import (
 	"identity-service/internal/config"
 )
 
-const TurnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+var TurnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 type TurnstileResponse struct {
 	Success  bool     `json:"success"`
