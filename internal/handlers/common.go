@@ -75,7 +75,7 @@ func (s *Server) verifyApp(next func(w http.ResponseWriter, r *http.Request, app
 		}
 		app, err := s.appService.GetByClientID(r.Context(), appID)
 		if err != nil || app == nil {
-			core.WriteDetail(w, http.StatusUnauthorized, "Invalid application ID")
+			core.WriteDetail(w, http.StatusForbidden, "Invalid application context")
 			return
 		}
 		next(w, r, app)

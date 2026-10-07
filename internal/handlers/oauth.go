@@ -96,7 +96,7 @@ func (s *Server) OAuthToken(w http.ResponseWriter, r *http.Request) {
 	audience := r.FormValue("audience")
 
 	if grantType == "" || clientID == "" {
-		core.WriteOAuthError(w, core.NewOAuthError("invalid_request", "grant_type and client_id are required", http.StatusBadRequest))
+		core.WriteValidationError(w, "Field required: grant_type and client_id")
 		return
 	}
 
