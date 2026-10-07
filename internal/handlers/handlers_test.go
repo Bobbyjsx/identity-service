@@ -12,9 +12,11 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"cloud.google.com/go/firestore"
 	"github.com/google/uuid"
 
 	"identity-service/internal/config"
@@ -27,8 +29,34 @@ import (
 var (
 	testServer *handlers.Server
 	testRouter http.Handler
+	testDB     *firestore.Client
+	testNotif  *mockNotificationService
 	cfg        *config.Config
 )
+
+type mockNotificationService struct {
+	mu           sync.Mutex
+	lastResetURL string
+	lastOTP      string
+}
+
+func (m *mockNotificationService) SendPasswordResetEmail(ctx context.Context, to, resetURL, appName, appID string, firstName *string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastResetURL = resetURL
+	return nil
+}
+
+func (m *mockNotificationService) SendWelcomeEmail(ctx context.Context, to, appName, appID string, firstName *string) error {
+	return nil
+}
+
+func (m *mockNotificationService) SendVerificationEmail(ctx context.Context, to, otp, appName, appID string, firstName *string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastOTP = otp
+	return nil
+}
 
 func setupTest(t *testing.T) {
 	os.Setenv("ENVIRONMENT", "testing")
@@ -45,16 +73,17 @@ func setupTest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to initialize Firestore test client: %v", err)
 	}
+	testDB = dbClient
 
 	km := services.NewKeyManager(cfg)
 	if err := km.Initialize(ctx, dbClient); err != nil {
 		t.Fatalf("Failed to initialize KeyManager: %v", err)
 	}
 
+	testNotif = &mockNotificationService{}
 	appSvc := services.NewApplicationService(dbClient)
 	authSvc := services.NewAuthService(cfg, dbClient, appSvc, km)
-	notifSvc := services.NewLoggingNotificationService()
-	oauthSvc := services.NewOAuthService(cfg, dbClient, appSvc, authSvc, km, notifSvc)
+	oauthSvc := services.NewOAuthService(cfg, dbClient, appSvc, authSvc, km, testNotif)
 	rbacSvc := services.NewRBACService(dbClient)
 
 	testServer = handlers.NewServer(cfg, appSvc, authSvc, oauthSvc, rbacSvc, km)
@@ -70,15 +99,18 @@ func pkcePair() (string, string) {
 }
 
 func createTestApp(t *testing.T, redirectURI string) (string, string) {
-	body := map[string]interface{}{
+	return createTestAppWithConfig(t, map[string]interface{}{
 		"name": "Test Application",
 		"oauth": map[string]interface{}{
 			"redirect_uris":  []string{redirectURI},
 			"allowed_scopes": []string{"openid", "profile", "email"},
 			"allowed_grants": []string{"authorization_code", "client_credentials"},
 		},
-	}
-	bodyBytes, _ := json.Marshal(body)
+	})
+}
+
+func createTestAppWithConfig(t *testing.T, appConfig map[string]interface{}) (string, string) {
+	bodyBytes, _ := json.Marshal(appConfig)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/applications", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
@@ -96,6 +128,54 @@ func createTestApp(t *testing.T, redirectURI string) (string, string) {
 		t.Fatalf("Failed to parse app creds: %v", err)
 	}
 	return creds.ClientID, creds.ClientSecret
+}
+
+func authorizeAndGetSession(t *testing.T, clientID, redirectURI, state, challenge string) string {
+	return authorizeAndGetSessionWithScope(t, clientID, redirectURI, "openid profile email", state, challenge)
+}
+
+func authorizeAndGetSessionWithScope(t *testing.T, clientID, redirectURI, scope, state, challenge string) string {
+	authURL := fmt.Sprintf("/api/v1/oauth/authorize?client_id=%s&redirect_uri=%s&response_type=code&scope=%s&code_challenge=%s&code_challenge_method=S256&state=%s",
+		clientID, url.QueryEscape(redirectURI), url.QueryEscape(scope), challenge, state)
+	req := httptest.NewRequest(http.MethodGet, authURL, nil)
+	w := httptest.NewRecorder()
+	testRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("Authorize expected 302, got %d: %s", w.Code, w.Body.String())
+	}
+
+	loc := w.Header().Get("Location")
+	parts := strings.Split(loc, "/auth/")
+	if len(parts) < 2 {
+		t.Fatalf("Invalid location redirect: %s", loc)
+	}
+	return strings.Split(parts[1], "/")[0]
+}
+
+func loginAndGetCode(t *testing.T, sessionID, email, password string) string {
+	loginBody := fmt.Sprintf(`{"email":%q,"password":%q}`, email, password)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth-sessions/"+sessionID+"/login", strings.NewReader(loginBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	testRouter.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Session login failed: %d, %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]interface{}
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	redirURL, ok := resp["redirect_url"].(string)
+	if !ok || redirURL == "" {
+		t.Fatalf("No redirect_url in login response: %v", resp)
+	}
+
+	parsed, err := url.Parse(redirURL)
+	if err != nil {
+		t.Fatalf("Failed to parse redirect_url: %v", err)
+	}
+	return parsed.Query().Get("code")
 }
 
 func TestHealth(t *testing.T) {
