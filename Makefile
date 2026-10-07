@@ -1,7 +1,14 @@
-.PHONY: install run lint format test clean
+.PHONY: install run lint format test go-test build bench clean
 
 install:
 	uv sync
+	go mod download
+
+build:
+	go build -o bin/identity-service cmd/server/main.go
+
+go-test:
+	go test -v -count=1 ./...
 
 run:
 	docker compose up --build --watch identity-service
@@ -30,17 +37,23 @@ test:
 		done; \
 		STOP_EMULATOR=1; \
 	fi; \
+	echo "=== Running Go Tests ==="; \
+	FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 GOOGLE_CLOUD_PROJECT=test-project ENVIRONMENT=testing go test -v -count=1 ./...; \
+	GO_STATUS=$$?; \
+	echo "=== Running Pytest Suite ==="; \
 	PYTHONPATH=. uv run pytest tests/ -v; \
-	STATUS=$$?; \
+	PY_STATUS=$$?; \
 	if [ "$$STOP_EMULATOR" = "1" ]; then \
 		docker compose down; \
 	fi; \
-	exit $$STATUS
+	if [ $$GO_STATUS -ne 0 ]; then exit $$GO_STATUS; fi; \
+	exit $$PY_STATUS
 
 clean:
 	rm -rf __pycache__
 	rm -rf .ruff_cache
 	rm -rf .pytest_cache
+	rm -rf bin
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	docker compose down --rmi local
 	docker image prune -f
