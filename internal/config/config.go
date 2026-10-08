@@ -108,6 +108,6 @@ func Load() *Config {
 		TurnstileEnabled:                        getEnvBool("TURNSTILE_ENABLED", true),
 		GCPProjectID:                            getEnv("GCP_PROJECT_ID", "project-atlas-501612"),
 		PubSubTopicID:                           getEnv("PUBSUB_TOPIC_ID", "platform-events"),
-		Port:                                    getEnv("PORT", "8002"),
+		Port:                                    getEnv("PORT", "8001"),
 	}
 }
