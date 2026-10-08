@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/cors"
 
 	"identity-service/internal/core"
+	"identity-service/internal/docs"
 )
 
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
@@ -42,6 +43,12 @@ func (s *Server) Routes() http.Handler {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		core.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+
+	// Documentation
+	r.Get("/openapi.json", docs.OpenAPIHandler)
+	r.Get("/docs", docs.SwaggerUIHandler)
+	r.Get("/docs/*", docs.SwaggerUIHandler)
+	r.Get("/redoc", docs.RedocHandler)
 
 	// Discovery
 	r.Get("/.well-known/jwks.json", s.WellKnownJWKS)
