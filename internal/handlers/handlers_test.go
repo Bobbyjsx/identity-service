@@ -502,3 +502,47 @@ func TestRBAC(t *testing.T) {
 		t.Fatalf("List roles failed: %d", wListRole.Code)
 	}
 }
+
+func TestDocumentationRoutes(t *testing.T) {
+	if testRouter == nil {
+		setupTest(t)
+	}
+
+	// 1. /docs
+	reqDocs := httptest.NewRequest(http.MethodGet, "/docs", nil)
+	wDocs := httptest.NewRecorder()
+	testRouter.ServeHTTP(wDocs, reqDocs)
+	if wDocs.Code != http.StatusOK {
+		t.Fatalf("/docs returned status %d", wDocs.Code)
+	}
+	if !strings.Contains(wDocs.Body.String(), "SwaggerUIBundle") {
+		t.Fatalf("/docs did not contain SwaggerUIBundle: %s", wDocs.Body.String())
+	}
+
+	// 2. /openapi.json
+	reqOpenAPI := httptest.NewRequest(http.MethodGet, "/openapi.json", nil)
+	wOpenAPI := httptest.NewRecorder()
+	testRouter.ServeHTTP(wOpenAPI, reqOpenAPI)
+	if wOpenAPI.Code != http.StatusOK {
+		t.Fatalf("/openapi.json returned status %d", wOpenAPI.Code)
+	}
+	var openAPISpec map[string]interface{}
+	if err := json.Unmarshal(wOpenAPI.Body.Bytes(), &openAPISpec); err != nil {
+		t.Fatalf("/openapi.json is not valid JSON: %v", err)
+	}
+	if openAPISpec["openapi"] != "3.0.3" {
+		t.Fatalf("/openapi.json has unexpected version: %v", openAPISpec["openapi"])
+	}
+
+	// 3. /redoc
+	reqRedoc := httptest.NewRequest(http.MethodGet, "/redoc", nil)
+	wRedoc := httptest.NewRecorder()
+	testRouter.ServeHTTP(wRedoc, reqRedoc)
+	if wRedoc.Code != http.StatusOK {
+		t.Fatalf("/redoc returned status %d", wRedoc.Code)
+	}
+	if !strings.Contains(wRedoc.Body.String(), "<redoc") {
+		t.Fatalf("/redoc did not contain <redoc tag: %s", wRedoc.Body.String())
+	}
+}
+
