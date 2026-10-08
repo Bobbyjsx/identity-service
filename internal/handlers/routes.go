@@ -43,12 +43,18 @@ func (s *Server) Routes() http.Handler {
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		core.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	r.Head("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
 
 	// Documentation
 	r.Get("/openapi.json", docs.OpenAPIHandler)
+	r.Head("/openapi.json", docs.OpenAPIHandler)
 	r.Get("/docs", docs.SwaggerUIHandler)
+	r.Head("/docs", docs.SwaggerUIHandler)
 	r.Get("/docs/*", docs.SwaggerUIHandler)
 	r.Get("/redoc", docs.RedocHandler)
+	r.Head("/redoc", docs.RedocHandler)
 
 	// Discovery
 	r.Get("/.well-known/jwks.json", s.WellKnownJWKS)
