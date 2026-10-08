@@ -1,24 +1,28 @@
-FROM python:3.12-slim
+# Build stage
+FROM golang:1.24-alpine AS builder
+
+RUN apk --no-cache add upx
 
 WORKDIR /app
 
-# Install uv from official binary image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+# Download dependencies
+COPY go.mod go.sum ./
+RUN go mod download
 
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONHASHSEED=random \
-    UV_COMPILE_BYTECODE=1 \
-    PATH="/app/.venv/bin:$PATH"
-
-# Install dependencies using uv sync
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-
-# Copy source code
+# Copy source code and build statically linked binary
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -trimpath -o /identity-service cmd/server/main.go
+RUN upx --best --lzma /identity-service
 
-# Pre-compile Python bytecode to speed up cold-start module loading
-RUN python -m compileall -q /app
+# Production stage
+FROM alpine:3.21
 
-# Run Uvicorn. PORT and WEB_CONCURRENCY can be injected by environment.
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8001} --workers ${WEB_CONCURRENCY:-2}"]
+RUN apk --no-cache add ca-certificates tzdata
+
+WORKDIR /app
+
+COPY --from=builder /identity-service /app/identity-service
+
+EXPOSE 8001
+
+CMD ["/app/identity-service"]

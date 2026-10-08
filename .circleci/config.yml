@@ -3,7 +3,7 @@ version: 2.1
 jobs:
   test:
     docker:
-      - image: cimg/python:3.12
+      - image: cimg/go:1.24
       - image: google/cloud-sdk:latest
         command: ["gcloud", "beta", "emulators", "firestore", "start", "--host-port=0.0.0.0:8080"]
         environment:
@@ -12,26 +12,19 @@ jobs:
     steps:
       - checkout
 
-      - run:
-          name: Install uv
-          command: |
-            curl -LsSf https://astral.sh/uv/install.sh | sh
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-
       - restore_cache:
           keys:
-            - v1-uv-cache-{{ checksum "uv.lock" }}
-            - v1-uv-cache-
+            - go-mod-v1-{{ checksum "go.sum" }}
+            - go-mod-v1-
 
       - run:
-          name: Sync Dependencies with uv
-          command: |
-            uv sync --frozen
+          name: Download Go Modules
+          command: go mod download
 
       - save_cache:
-          key: v1-uv-cache-{{ checksum "uv.lock" }}
+          key: go-mod-v1-{{ checksum "go.sum" }}
           paths:
-            - ~/.cache/uv
+            - "/go/pkg/mod"
 
       - run:
           name: Wait for Firestore Emulator
@@ -68,6 +61,35 @@ jobs:
             echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
             echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
             echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
+            echo "export PORT=8001" >> "$BASH_ENV"
+            echo "export DOCKER_NETWORK=docker_webnet" >> "$BASH_ENV"
+      - run:
+          name: Clone deploy-ops
+          command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
+      - run:
+          name: Build and Deploy
+          command: |
+            cd deploy-ops
+            make build
+            make deploy
+  deploy-sandbox:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: default
+          docker_layer_caching: true
+      - run:
+          name: Set Environment Variables
+          command: |
+            echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
+            echo "export SERVICE_NAME=identity-service-sandbox" >> "$BASH_ENV"
+            echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
+            echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
+            echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
+            echo "export PORT=8001" >> "$BASH_ENV"
+            echo "export DOCKER_NETWORK=docker_webnet" >> "$BASH_ENV"
       - run:
           name: Clone deploy-ops
           command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
@@ -96,6 +118,7 @@ jobs:
             echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
             echo "export HOST_PORT=8001" >> "$BASH_ENV"
             echo "export CONTAINER_PORT=8001" >> "$BASH_ENV"
+            echo "export PORT=8001" >> "$BASH_ENV"
       - run:
           name: Clone deploy-ops
           command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
@@ -129,6 +152,12 @@ workflows:
               only:
                 - main
                 - master
+  build-and-deploy-sandbox:
+    jobs:
+      - deploy-sandbox:
+          context:
+            - identity-service-staging
+            - deploy-ops
 
   build-and-deploy-staging:
     jobs:

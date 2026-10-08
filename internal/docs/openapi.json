@@ -1,0 +1,723 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Identity Service API",
+    "description": "Multi-tenant Identity Provider, OAuth 2.0 / OpenID Connect authorization server, and RBAC engine.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "Current Environment"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "AdminAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Admin-Token",
+        "description": "Admin token for administrative endpoints"
+      },
+      "ApplicationAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Application-Id",
+        "description": "Client ID representing the application tenant"
+      },
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Standard Bearer JWT access token"
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      },
+      "OAuthErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "invalid_request"
+          },
+          "error_description": {
+            "type": "string",
+            "example": "code, redirect_uri, and code_verifier are required"
+          }
+        }
+      },
+      "ApplicationBranding": {
+        "type": "object",
+        "properties": {
+          "logo_url": { "type": "string", "nullable": true },
+          "logo_with_text": { "type": "string", "nullable": true },
+          "primary_color": { "type": "string", "nullable": true },
+          "secondary_color": { "type": "string", "nullable": true },
+          "themes": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "ApplicationAuthenticationConfig": {
+        "type": "object",
+        "properties": {
+          "allow_signup": { "type": "boolean", "default": true },
+          "allow_password_login": { "type": "boolean", "default": true },
+          "require_email_verification": { "type": "boolean", "default": false }
+        }
+      },
+      "ApplicationOAuthConfig": {
+        "type": "object",
+        "properties": {
+          "redirect_uris": { "type": "array", "items": { "type": "string" } },
+          "allowed_scopes": { "type": "array", "items": { "type": "string" } },
+          "allowed_grants": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "Application": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "client_id": { "type": "string" },
+          "client_type": { "type": "string" },
+          "status": { "type": "string" },
+          "created_at": { "type": "string" },
+          "branding": { "$ref": "#/components/schemas/ApplicationBranding" },
+          "authentication": { "$ref": "#/components/schemas/ApplicationAuthenticationConfig" },
+          "oauth": { "$ref": "#/components/schemas/ApplicationOAuthConfig" }
+        }
+      },
+      "ApplicationCredentials": {
+        "type": "object",
+        "properties": {
+          "client_id": { "type": "string" },
+          "client_secret": { "type": "string" }
+        }
+      },
+      "ApplicationCreateRequest": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "client_type": { "type": "string", "default": "web" },
+          "branding": { "$ref": "#/components/schemas/ApplicationBranding" },
+          "authentication": { "$ref": "#/components/schemas/ApplicationAuthenticationConfig" },
+          "oauth": { "$ref": "#/components/schemas/ApplicationOAuthConfig" }
+        }
+      },
+      "PublicApplicationConfig": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "logo_url": { "type": "string", "nullable": true },
+          "logo_with_text": { "type": "string", "nullable": true },
+          "primary_color": { "type": "string", "nullable": true },
+          "secondary_color": { "type": "string", "nullable": true },
+          "themes": { "type": "array", "items": { "type": "string" } },
+          "allow_signup": { "type": "boolean" },
+          "allow_password_login": { "type": "boolean" },
+          "require_email_verification": { "type": "boolean" },
+          "allowed_scopes": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "UserCreateRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string" },
+          "username": { "type": "string", "nullable": true },
+          "first_name": { "type": "string", "nullable": true },
+          "last_name": { "type": "string", "nullable": true },
+          "turnstile_token": { "type": "string", "nullable": true }
+        }
+      },
+      "UserResponse": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "app_id": { "type": "string" },
+          "email": { "type": "string" },
+          "username": { "type": "string", "nullable": true },
+          "first_name": { "type": "string", "nullable": true },
+          "last_name": { "type": "string", "nullable": true },
+          "roles": { "type": "array", "items": { "type": "string" } },
+          "email_verified": { "type": "boolean" },
+          "created_at": { "type": "string" }
+        }
+      },
+      "TokenResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": { "type": "string" },
+          "token_type": { "type": "string", "example": "bearer" },
+          "expires_in": { "type": "integer", "example": 900 },
+          "refresh_token": { "type": "string", "nullable": true },
+          "id_token": { "type": "string", "nullable": true }
+        }
+      },
+      "RefreshTokenRequest": {
+        "type": "object",
+        "required": ["refresh_token"],
+        "properties": {
+          "refresh_token": { "type": "string" }
+        }
+      },
+      "AuthSessionResponse": {
+        "type": "object",
+        "properties": {
+          "session_id": { "type": "string" },
+          "status": { "type": "string" },
+          "application": { "type": "object" },
+          "scopes": { "type": "array", "items": { "type": "string" } },
+          "redirect_url": { "type": "string", "nullable": true }
+        }
+      },
+      "Permission": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "app_id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "created_at": { "type": "string" }
+        }
+      },
+      "PermissionCreateRequest": {
+        "type": "object",
+        "required": ["name", "description"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "Role": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "app_id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "permissions": { "type": "array", "items": { "type": "string" } },
+          "created_at": { "type": "string" }
+        }
+      },
+      "RoleCreateRequest": {
+        "type": "object",
+        "required": ["name", "description", "permissions"],
+        "properties": {
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "permissions": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "tags": ["System"],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/jwks.json": {
+      "get": {
+        "summary": "JSON Web Key Set (JWKS)",
+        "tags": ["Discovery"],
+        "description": "Returns public Ed25519 signing keys used to verify issued JWTs.",
+        "responses": {
+          "200": {
+            "description": "JWKS containing keys array"
+          }
+        }
+      }
+    },
+    "/.well-known/openid-configuration": {
+      "get": {
+        "summary": "OpenID Connect Discovery Document",
+        "tags": ["Discovery"],
+        "description": "Returns standard OIDC configuration metadata.",
+        "responses": {
+          "200": {
+            "description": "OIDC Configuration"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/applications": {
+      "post": {
+        "summary": "Create Application",
+        "tags": ["Admin"],
+        "security": [{ "AdminAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ApplicationCreateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Application created with one-time credentials",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ApplicationCredentials" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/applications/{client_id}": {
+      "get": {
+        "summary": "Get Application Details",
+        "tags": ["Admin"],
+        "security": [{ "AdminAuth": [] }],
+        "parameters": [
+          { "name": "client_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full application details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Application" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/applications/{client_id}/configuration": {
+      "patch": {
+        "summary": "Update Application Configuration",
+        "tags": ["Admin"],
+        "security": [{ "AdminAuth": [] }],
+        "parameters": [
+          { "name": "client_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated application",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Application" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/auth-sessions": {
+      "post": {
+        "summary": "Create Auth Session (Admin)",
+        "tags": ["Admin"],
+        "security": [{ "AdminAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created auth session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/applications/{client_id}/configuration": {
+      "get": {
+        "summary": "Get Public Application Configuration",
+        "tags": ["Applications"],
+        "description": "Safe public branding and authentication options for Identity UI.",
+        "parameters": [
+          { "name": "client_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public configuration",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PublicApplicationConfig" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/signup": {
+      "post": {
+        "summary": "Direct User Signup",
+        "tags": ["Auth"],
+        "security": [{ "ApplicationAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UserCreateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "summary": "Direct User Login",
+        "tags": ["Auth"],
+        "security": [{ "ApplicationAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UserCreateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication tokens",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TokenResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "summary": "Refresh Access Token",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RefreshTokenRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rotated token pair",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TokenResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "summary": "Current User",
+        "tags": ["Auth"],
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "User details",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/UserResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth-sessions/{session_id}": {
+      "get": {
+        "summary": "Load Auth Session Context",
+        "tags": ["Auth Sessions"],
+        "parameters": [
+          { "name": "session_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Session context",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth-sessions/{session_id}/login": {
+      "post": {
+        "summary": "Session Login",
+        "tags": ["Auth Sessions"],
+        "parameters": [
+          { "name": "session_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string" },
+                  "password": { "type": "string" },
+                  "turnstile_token": { "type": "string", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session outcome (redirect or verification needed)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth-sessions/{session_id}/signup": {
+      "post": {
+        "summary": "Session Signup",
+        "tags": ["Auth Sessions"],
+        "parameters": [
+          { "name": "session_id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UserCreateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session outcome",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthSessionResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/authorize": {
+      "get": {
+        "summary": "OAuth 2.0 Authorization Endpoint",
+        "tags": ["OAuth"],
+        "description": "Entry point for browser login. Creates auth session and redirects to UI.",
+        "parameters": [
+          { "name": "client_id", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "redirect_uri", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "response_type", "in": "query", "required": true, "schema": { "type": "string", "default": "code" } },
+          { "name": "code_challenge", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "code_challenge_method", "in": "query", "schema": { "type": "string", "default": "S256" } },
+          { "name": "scope", "in": "query", "schema": { "type": "string" } },
+          { "name": "state", "in": "query", "schema": { "type": "string" } },
+          { "name": "nonce", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirects to Identity UI"
+          }
+        }
+      }
+    },
+    "/api/v1/oauth/token": {
+      "post": {
+        "summary": "OAuth 2.0 Token Endpoint",
+        "tags": ["OAuth"],
+        "description": "Exchanges authorization_code (with PKCE) or client_credentials for tokens.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": ["grant_type", "client_id"],
+                "properties": {
+                  "grant_type": { "type": "string", "enum": ["authorization_code", "client_credentials"] },
+                  "client_id": { "type": "string" },
+                  "client_secret": { "type": "string" },
+                  "code": { "type": "string" },
+                  "redirect_uri": { "type": "string" },
+                  "code_verifier": { "type": "string" },
+                  "audience": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tokens issued",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TokenResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "OAuth Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/OAuthErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rbac/permissions": {
+      "post": {
+        "summary": "Create Permission",
+        "tags": ["RBAC"],
+        "security": [{ "ApplicationAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PermissionCreateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Permission created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Permission" }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Permissions",
+        "tags": ["RBAC"],
+        "security": [{ "ApplicationAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of permissions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Permission" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rbac/roles": {
+      "post": {
+        "summary": "Create Role",
+        "tags": ["RBAC"],
+        "security": [{ "ApplicationAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RoleCreateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Role created",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Role" }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "List Roles",
+        "tags": ["RBAC"],
+        "security": [{ "ApplicationAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "List of roles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Role" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
