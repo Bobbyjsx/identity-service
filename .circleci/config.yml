@@ -125,6 +125,12 @@ workflows:
               only:
                 - main
                 - master
+  build-and-deploy-sandbox:
+    jobs:
+      - deploy-production:
+          context:
+            - identity-service
+            - deploy-ops
 
   build-and-deploy-staging:
     jobs:
