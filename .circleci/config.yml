@@ -62,6 +62,7 @@ jobs:
             echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
             echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
             echo "export PORT=8001" >> "$BASH_ENV"
+            echo "export DOCKER_NETWORK=docker_webnet" >> "$BASH_ENV"
       - run:
           name: Clone deploy-ops
           command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
