@@ -72,6 +72,33 @@ jobs:
             cd deploy-ops
             make build
             make deploy
+  deploy-sandbox:
+    docker:
+      - image: cimg/base:current
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: default
+          docker_layer_caching: true
+      - run:
+          name: Set Environment Variables
+          command: |
+            echo "export DEPLOY_VERSION=${CIRCLE_SHA1}" >> "$BASH_ENV"
+            echo "export SERVICE_NAME=identity-service-sandbox" >> "$BASH_ENV"
+            echo "export ENV_DECLARATION_FILE=../.env.example" >> "$BASH_ENV"
+            echo "export BUILD_CONTEXT=.." >> "$BASH_ENV"
+            echo "export DOCKERFILE=../Dockerfile" >> "$BASH_ENV"
+            echo "export PORT=8001" >> "$BASH_ENV"
+            echo "export DOCKER_NETWORK=docker_webnet" >> "$BASH_ENV"
+      - run:
+          name: Clone deploy-ops
+          command: git clone --branch main https://github.com/Bobbyjsx/deploy-ops.git
+      - run:
+          name: Build and Deploy
+          command: |
+            cd deploy-ops
+            make build
+            make deploy
 
   deploy-staging:
     docker:
@@ -127,9 +154,9 @@ workflows:
                 - master
   build-and-deploy-sandbox:
     jobs:
-      - deploy-production:
+      - deploy-sandbox:
           context:
-            - identity-service
+            - identity-service-staging
             - deploy-ops
 
   build-and-deploy-staging:
