@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Server) WellKnownJWKS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "public, max-age=300, stale-while-revalidate=86400")
+	w.Header().Set("Cache-Control", "public, max-age=2592000, stale-while-revalidate=604800")
 	jwks, err := s.keyManager.GetJWKS(r.Context())
 	if err != nil {
 		handleError(w, err, true)
@@ -19,7 +19,7 @@ func (s *Server) WellKnownJWKS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) WellKnownOpenIDConfiguration(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "public, max-age=300, stale-while-revalidate=86400")
+	w.Header().Set("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400")
 	base := strings.TrimRight(s.cfg.PublicBaseURL, "/")
 
 	config := map[string]interface{}{
