@@ -61,6 +61,7 @@ const redocHTML = `<!DOCTYPE html>
 
 // OpenAPIHandler serves the embedded openapi.json file.
 func OpenAPIHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600")
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(OpenAPISpec)
@@ -68,6 +69,7 @@ func OpenAPIHandler(w http.ResponseWriter, r *http.Request) {
 
 // SwaggerUIHandler serves the interactive Swagger UI.
 func SwaggerUIHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(swaggerUIHTML))
@@ -75,6 +77,7 @@ func SwaggerUIHandler(w http.ResponseWriter, r *http.Request) {
 
 // RedocHandler serves the alternative ReDoc documentation UI.
 func RedocHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "public, max-age=86400, stale-while-revalidate=3600")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(redocHTML))
