@@ -596,17 +596,7 @@ func (s *OAuthService) IssueAuthorizationCode(ctx context.Context, tx *models.Au
 
 func (s *OAuthService) isProduction() bool {
 	envLower := strings.ToLower(strings.TrimSpace(s.cfg.Environment))
-	if envLower != "production" && envLower != "prod" {
-		return false
-	}
-	publicURL := strings.ToLower(s.cfg.PublicBaseURL)
-	issuerURL := strings.ToLower(s.cfg.IdentityIssuer)
-	for _, nonProd := range []string{"vm-id", "sandbox", "staging", "dev", "localhost", "127.0.0.1"} {
-		if strings.Contains(publicURL, nonProd) || strings.Contains(issuerURL, nonProd) {
-			return false
-		}
-	}
-	return true
+	return envLower == "production" || envLower == "prod"
 }
 
 func (s *OAuthService) VerifyEmail(ctx context.Context, sessionID, verificationToken string) (map[string]interface{}, error) {
