@@ -362,3 +362,95 @@ func TestCallbackURLPreservesClientState(t *testing.T) {
 	parsed, _ := url.Parse(resp.JSONMap()["redirect_url"].(string))
 	assert.Equal(t, "custom-state-value", parsed.Query().Get("state"))
 }
+
+func TestEmailVerificationWithDefaultOTPInNonProd(t *testing.T) {
+	h := setup(t)
+	appData := createApplication(t, h, "", map[string]interface{}{
+		"oauth":          map[string]interface{}{"redirect_uris": []string{RedirectURI}},
+		"authentication": map[string]interface{}{"require_email_verification": true},
+	}, "")
+	clientID := appData["client_id"].(string)
+
+	txID, _, _ := authorizeAndGetTransaction(t, h, clientID, nil)
+	email := fmt.Sprintf("default-otp-%s@example.com", uuid.New().String()[:8])
+
+	respSignup := h.Client.Post(fmt.Sprintf("/api/v1/auth-sessions/%s/signup", txID), map[string]string{
+		"email":    email,
+		"password": "password123",
+	}, nil)
+	require.Equal(t, http.StatusOK, respSignup.StatusCode)
+	assert.Equal(t, true, respSignup.JSONMap()["email_verification_required"])
+
+	// Using default OTP "111111" in testing environment
+	respVerify := h.Client.Post(fmt.Sprintf("/api/v1/auth-sessions/%s/verify-email", txID), map[string]string{
+		"verification_token": "111111",
+	}, nil)
+	assert.Equal(t, http.StatusOK, respVerify.StatusCode)
+	data := respVerify.JSONMap()
+	require.NotEmpty(t, data["redirect_url"])
+	parsed, _ := url.Parse(data["redirect_url"].(string))
+	assert.True(t, strings.HasPrefix(parsed.Query().Get("code"), "code_"))
+
+	snap, err := h.DB.Collection("auth_sessions").Doc(txID).Get(context.Background())
+	require.NoError(t, err)
+	userID := snap.Data()["user_id"].(string)
+	userSnap, err := h.DB.Collection("users").Doc(userID).Get(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, true, userSnap.Data()["email_verified"])
+	assert.Equal(t, "completed", snap.Data()["status"])
+}
+
+func TestEmailVerificationWithDefaultOTPBlockedInProd(t *testing.T) {
+	h := setup(t)
+	// Temporarily simulate production environment
+	h.Config.Environment = "production"
+	defer func() {
+		h.Config.Environment = "testing"
+	}()
+
+	appData := createApplication(t, h, "", map[string]interface{}{
+		"oauth":          map[string]interface{}{"redirect_uris": []string{RedirectURI}},
+		"authentication": map[string]interface{}{"require_email_verification": true},
+	}, "")
+	clientID := appData["client_id"].(string)
+
+	txID, _, _ := authorizeAndGetTransaction(t, h, clientID, nil)
+	email := fmt.Sprintf("prod-otp-%s@example.com", uuid.New().String()[:8])
+
+	respSignup := h.Client.Post(fmt.Sprintf("/api/v1/auth-sessions/%s/signup", txID), map[string]string{
+		"email":    email,
+		"password": "password123",
+	}, nil)
+	require.Equal(t, http.StatusOK, respSignup.StatusCode)
+
+	// Using default OTP "111111" in production must fail
+	respVerify := h.Client.Post(fmt.Sprintf("/api/v1/auth-sessions/%s/verify-email", txID), map[string]string{
+		"verification_token": "111111",
+	}, nil)
+	assert.Equal(t, http.StatusBadRequest, respVerify.StatusCode)
+	assert.Equal(t, "invalid_verification_token", respVerify.JSONMap()["error"])
+}
+
+func TestDirectLoginBlockedWhenEmailVerificationRequired(t *testing.T) {
+	h := setup(t)
+	appData := createApplication(t, h, "", map[string]interface{}{
+		"oauth":          map[string]interface{}{"redirect_uris": []string{RedirectURI}},
+		"authentication": map[string]interface{}{"require_email_verification": true},
+	}, "")
+	clientID := appData["client_id"].(string)
+
+	email := fmt.Sprintf("unverified-%s@example.com", uuid.New().String()[:8])
+	signupResp := h.Client.Post("/api/v1/auth/signup", map[string]string{
+		"email":    email,
+		"password": "password123",
+	}, map[string]string{"X-Application-Id": clientID})
+	require.Equal(t, http.StatusOK, signupResp.StatusCode)
+
+	// Attempt direct login via /api/v1/auth/login without verifying email
+	loginResp := h.Client.Post("/api/v1/auth/login", map[string]string{
+		"email":    email,
+		"password": "password123",
+	}, map[string]string{"X-Application-Id": clientID})
+	assert.Equal(t, http.StatusForbidden, loginResp.StatusCode)
+	assert.Equal(t, "Email verification required before signing in.", loginResp.JSONMap()["detail"])
+}

@@ -222,10 +222,23 @@ func (s *AuthService) IssueUserTokens(ctx context.Context, user *models.User, ap
 }
 
 func (s *AuthService) Login(ctx context.Context, appID string, req UserCreateRequest) (*models.TokenResponse, error) {
+	app, err := s.appService.GetByClientID(ctx, appID)
+	if err != nil {
+		return nil, err
+	}
+	if app == nil {
+		return nil, core.NewHTTPError(http.StatusForbidden, "Invalid application context")
+	}
+
 	user, err := s.AuthenticateUser(ctx, appID, req.Email, req.Password)
 	if err != nil {
 		return nil, err
 	}
+
+	if app.Authentication.RequireEmailVerification && !user.EmailVerified {
+		return nil, core.NewHTTPError(http.StatusForbidden, "Email verification required before signing in.")
+	}
+
 	return s.IssueUserTokens(ctx, user, appID, nil)
 }
 
