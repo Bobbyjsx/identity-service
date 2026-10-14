@@ -594,6 +594,21 @@ func (s *OAuthService) IssueAuthorizationCode(ctx context.Context, tx *models.Au
 	return rawCode, nil
 }
 
+func (s *OAuthService) isProduction() bool {
+	envLower := strings.ToLower(strings.TrimSpace(s.cfg.Environment))
+	if envLower != "production" && envLower != "prod" {
+		return false
+	}
+	publicURL := strings.ToLower(s.cfg.PublicBaseURL)
+	issuerURL := strings.ToLower(s.cfg.IdentityIssuer)
+	for _, nonProd := range []string{"vm-id", "sandbox", "staging", "dev", "localhost", "127.0.0.1"} {
+		if strings.Contains(publicURL, nonProd) || strings.Contains(issuerURL, nonProd) {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *OAuthService) VerifyEmail(ctx context.Context, sessionID, verificationToken string) (map[string]interface{}, error) {
 	tx, app, err := s.loadSessionForOperation(ctx, sessionID, map[string]bool{"pending": true, "authenticated": true})
 	if err != nil {
@@ -606,8 +621,7 @@ func (s *OAuthService) VerifyEmail(ctx context.Context, sessionID, verificationT
 		return nil, core.NewOAuthError("invalid_session_state", "No user is associated with this session")
 	}
 
-	envLower := strings.ToLower(strings.TrimSpace(s.cfg.Environment))
-	isProd := envLower == "production" || envLower == "prod"
+	isProd := s.isProduction()
 	isDefaultOTP := !isProd && verificationToken == "111111"
 
 	var tokenIDToMarkUsed string
