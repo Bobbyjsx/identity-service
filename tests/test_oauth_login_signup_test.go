@@ -404,8 +404,12 @@ func TestEmailVerificationWithDefaultOTPBlockedInProd(t *testing.T) {
 	h := setup(t)
 	// Temporarily simulate production environment
 	h.Config.Environment = "production"
+	h.Config.PublicBaseURL = "https://id-api.bobslab.xyz"
+	h.Config.IdentityIssuer = "https://id-api.bobslab.xyz"
 	defer func() {
 		h.Config.Environment = "testing"
+		h.Config.PublicBaseURL = "http://localhost:8002"
+		h.Config.IdentityIssuer = "http://localhost:8002"
 	}()
 
 	appData := createApplication(t, h, "", map[string]interface{}{
