@@ -35,7 +35,20 @@ func main() {
 
 	appService := services.NewApplicationService(dbClient)
 	authService := services.NewAuthService(cfg, dbClient, appService, keyManager)
-	notifService := services.NewLoggingNotificationService()
+	var notifService services.NotificationService = services.NewLoggingNotificationService()
+	if cfg.PubSubTopicID != "" && (cfg.FirebaseCredentialsJSON != "" || cfg.GoogleApplicationCredentials != "") {
+		psService, err := services.NewPubSubNotificationService(ctx, cfg)
+		if err != nil {
+			log.Printf("Warning: Failed to initialize PubSub notification service: %v, falling back to logging", err)
+		} else {
+			log.Printf("Initialized PubSub notification service (topic: %s, project: %s)", cfg.PubSubTopicID, cfg.GCPProjectID)
+			notifService = psService
+			defer psService.Close()
+		}
+	} else {
+		log.Printf("PubSub credentials not provided, using LoggingNotificationService")
+	}
+
 	oauthService := services.NewOAuthService(cfg, dbClient, appService, authService, keyManager, notifService)
 	rbacService := services.NewRBACService(dbClient)
 
