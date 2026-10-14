@@ -397,11 +397,18 @@ func (s *OAuthService) Login(ctx context.Context, sessionID, email, password str
 		return nil, core.NewOAuthError("invalid_credentials", "Invalid email or password", http.StatusUnauthorized)
 	}
 
-	return s.completeAuthentication(ctx, tx, app, user)
+	res, err := s.completeAuthentication(ctx, tx, app, user)
+	if err != nil {
+		return nil, err
+	}
+	if res != nil && res["email_verification_required"] == true {
+		res["detail"] = "Email verification required before signing in."
+	}
+	return res, nil
 }
 
 func (s *OAuthService) Signup(ctx context.Context, sessionID string, req SessionSignupRequest) (map[string]interface{}, error) {
-	tx, _, err := s.loadSessionForOperation(ctx, sessionID, map[string]bool{"pending": true})
+	tx, app, err := s.loadSessionForOperation(ctx, sessionID, map[string]bool{"pending": true})
 	if err != nil {
 		return nil, err
 	}
@@ -427,8 +434,14 @@ func (s *OAuthService) Signup(ctx context.Context, sessionID string, req Session
 		return nil, err
 	}
 
-	app, _ := s.appService.GetByID(ctx, tx.ApplicationID)
-	return s.completeAuthentication(ctx, tx, app, user)
+	res, err := s.completeAuthentication(ctx, tx, app, user)
+	if err != nil {
+		return nil, err
+	}
+	if res != nil && res["email_verification_required"] == true {
+		res["detail"] = "Signup successful. Email verification required."
+	}
+	return res, nil
 }
 
 func (s *OAuthService) completeAuthentication(ctx context.Context, tx *models.AuthSession, app *models.Application, user *models.User) (map[string]interface{}, error) {
@@ -464,6 +477,7 @@ func (s *OAuthService) completeAuthentication(ctx context.Context, tx *models.Au
 		return map[string]interface{}{
 			"redirect_url":                nil,
 			"email_verification_required": true,
+			"detail":                      "Signup successful. Email verification required.",
 		}, nil
 	}
 
@@ -585,59 +599,82 @@ func (s *OAuthService) VerifyEmail(ctx context.Context, sessionID, verificationT
 	if err != nil {
 		return nil, err
 	}
+	if !app.Authentication.RequireEmailVerification {
+		return nil, core.NewOAuthError("email_verification_not_required", "Email verification is not required for this application", http.StatusBadRequest)
+	}
 	if tx.UserID == nil || *tx.UserID == "" {
 		return nil, core.NewOAuthError("invalid_session_state", "No user is associated with this session")
 	}
 
-	tokenHash := core.HashToken(verificationToken)
-	iter := s.db.Collection("email_verification_tokens").Where("token_hash", "==", tokenHash).Limit(1).Documents(ctx)
-	defer iter.Stop()
+	envLower := strings.ToLower(strings.TrimSpace(s.cfg.Environment))
+	isProd := envLower == "production" || envLower == "prod"
+	isDefaultOTP := !isProd && verificationToken == "111111"
 
-	doc, err := iter.Next()
-	var token *models.EmailVerificationToken
-	if err == nil {
-		var tok models.EmailVerificationToken
-		if err := doc.DataTo(&tok); err == nil {
-			tok.ID = doc.Ref.ID
-			token = &tok
+	var tokenIDToMarkUsed string
+	if isDefaultOTP {
+		// Default token for all non-production environments
+		iter := s.db.Collection("email_verification_tokens").
+			Where("user_id", "==", *tx.UserID).
+			Where("app_id", "==", tx.ClientID).
+			Where("status", "==", "active").
+			Limit(1).
+			Documents(ctx)
+		if doc, err := iter.Next(); err == nil && doc != nil {
+			tokenIDToMarkUsed = doc.Ref.ID
 		}
-	}
+		iter.Stop()
+	} else {
+		tokenHash := core.HashToken(verificationToken)
+		iter := s.db.Collection("email_verification_tokens").Where("token_hash", "==", tokenHash).Limit(1).Documents(ctx)
+		defer iter.Stop()
 
-	boundCorrectly := token != nil && token.AppID == tx.ClientID && token.UserID == *tx.UserID
-	if !boundCorrectly {
-		sessionRef := s.db.Collection("auth_sessions").Doc(sessionID)
-		var attempts int
-		_ = s.db.RunTransaction(ctx, func(ctx context.Context, ftx *firestore.Transaction) error {
-			snap, err := ftx.Get(sessionRef)
-			if err != nil {
-				return err
+		doc, err := iter.Next()
+		var token *models.EmailVerificationToken
+		if err == nil {
+			var tok models.EmailVerificationToken
+			if err := doc.DataTo(&tok); err == nil {
+				tok.ID = doc.Ref.ID
+				token = &tok
 			}
-			var current models.AuthSession
-			if err := snap.DataTo(&current); err != nil {
-				return err
-			}
-			attempts = current.OTPAttempts + 1
-			newStatus := current.Status
-			if attempts >= 5 {
-				newStatus = "cancelled"
-			}
-			return ftx.Update(sessionRef, []firestore.Update{
-				{Path: "otp_attempts", Value: attempts},
-				{Path: "status", Value: newStatus},
+		}
+
+		boundCorrectly := token != nil && token.AppID == tx.ClientID && token.UserID == *tx.UserID
+		if !boundCorrectly {
+			sessionRef := s.db.Collection("auth_sessions").Doc(sessionID)
+			var attempts int
+			_ = s.db.RunTransaction(ctx, func(ctx context.Context, ftx *firestore.Transaction) error {
+				snap, err := ftx.Get(sessionRef)
+				if err != nil {
+					return err
+				}
+				var current models.AuthSession
+				if err := snap.DataTo(&current); err != nil {
+					return err
+				}
+				attempts = current.OTPAttempts + 1
+				newStatus := current.Status
+				if attempts >= 5 {
+					newStatus = "cancelled"
+				}
+				return ftx.Update(sessionRef, []firestore.Update{
+					{Path: "otp_attempts", Value: attempts},
+					{Path: "status", Value: newStatus},
+				})
 			})
-		})
-		if attempts >= 5 {
-			return nil, core.NewOAuthError("otp_attempts_exceeded", "Too many incorrect attempts. Please start a new login.")
+			if attempts >= 5 {
+				return nil, core.NewOAuthError("otp_attempts_exceeded", "Too many incorrect attempts. Please start a new login.")
+			}
+			return nil, core.NewOAuthError("invalid_verification_token", "Verification token is invalid")
 		}
-		return nil, core.NewOAuthError("invalid_verification_token", "Verification token is invalid")
-	}
 
-	tExp, err := time.Parse(time.RFC3339, token.ExpiresAt)
-	if err != nil || time.Now().UTC().After(tExp) {
-		return nil, core.NewOAuthError("verification_token_expired", "Verification token has expired")
-	}
-	if token.Status != "active" {
-		return nil, core.NewOAuthError("invalid_verification_token", "Verification token has already been used")
+		tExp, err := time.Parse(time.RFC3339, token.ExpiresAt)
+		if err != nil || time.Now().UTC().After(tExp) {
+			return nil, core.NewOAuthError("verification_token_expired", "Verification token has expired")
+		}
+		if token.Status != "active" {
+			return nil, core.NewOAuthError("invalid_verification_token", "Verification token has already been used")
+		}
+		tokenIDToMarkUsed = token.ID
 	}
 
 	user, err := s.authService.GetUserByID(ctx, tx.ClientID, *tx.UserID)
@@ -649,14 +686,20 @@ func (s *OAuthService) VerifyEmail(ctx context.Context, sessionID, verificationT
 	_, _ = s.db.Collection("users").Doc(user.ID).Update(ctx, []firestore.Update{
 		{Path: "email_verified", Value: true},
 	})
-	_, _ = s.db.Collection("email_verification_tokens").Doc(token.ID).Update(ctx, []firestore.Update{
-		{Path: "status", Value: "used"},
-		{Path: "used_at", Value: nowStr},
-	})
+	if tokenIDToMarkUsed != "" {
+		_, _ = s.db.Collection("email_verification_tokens").Doc(tokenIDToMarkUsed).Update(ctx, []firestore.Update{
+			{Path: "status", Value: "used"},
+			{Path: "used_at", Value: nowStr},
+		})
+	}
 
 	_ = s.notifications.SendWelcomeEmail(ctx, user.Email, app.Name, tx.ClientID, user.FirstName)
 
-	rawCode, err := s.IssueAuthorizationCode(ctx, tx, app, user, "authenticated")
+	expectedStatus := s.EffectiveStatus(tx)
+	if expectedStatus != "authenticated" && expectedStatus != "pending" {
+		expectedStatus = "authenticated"
+	}
+	rawCode, err := s.IssueAuthorizationCode(ctx, tx, app, user, expectedStatus)
 	if err != nil {
 		return nil, err
 	}
@@ -669,6 +712,9 @@ func (s *OAuthService) ResendOTP(ctx context.Context, sessionID string) (map[str
 	tx, app, err := s.loadSessionForOperation(ctx, sessionID, map[string]bool{"authenticated": true})
 	if err != nil {
 		return nil, err
+	}
+	if !app.Authentication.RequireEmailVerification {
+		return nil, core.NewOAuthError("email_verification_not_required", "Email verification is not required for this application", http.StatusBadRequest)
 	}
 	if tx.UserID == nil || *tx.UserID == "" {
 		return nil, core.NewOAuthError("invalid_session_state", "No user is associated with this session")
@@ -945,6 +991,10 @@ func (s *OAuthService) ExchangeAuthorizationCode(
 	user, err := s.authService.GetUserByID(ctx, codeDoc.ClientID, codeDoc.UserID)
 	if err != nil || user == nil {
 		return nil, core.NewOAuthError("invalid_grant", "User no longer exists")
+	}
+
+	if app.Authentication.RequireEmailVerification && !user.EmailVerified {
+		return nil, core.NewOAuthError("invalid_grant", "Email verification required before signing in")
 	}
 
 	nowStr := time.Now().UTC().Format(time.RFC3339)
