@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,18 +32,25 @@ type BenchResult struct {
 	Errors      int
 }
 
-func runBenchmark(name string, totalReqs int, concurrency int, reqFn func() (*http.Request, error)) BenchResult {
+func runBenchmark(name string, totalReqs int, concurrency int, expectedStatus int, reqFn func() (*http.Request, error)) BenchResult {
+	if expectedStatus <= 0 {
+		expectedStatus = http.StatusOK
+	}
+
 	latencies := make([]time.Duration, 0, totalReqs)
 	var mu sync.Mutex
 	var errCount int
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			MaxIdleConns:        concurrency * 2,
-			MaxIdleConnsPerHost: concurrency * 2,
+			MaxIdleConns:        concurrency * 4,
+			MaxIdleConnsPerHost: concurrency * 4,
 			IdleConnTimeout:     30 * time.Second,
 		},
-		Timeout: 10 * time.Second,
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 
 	workChan := make(chan int, totalReqs)
@@ -71,7 +79,7 @@ func runBenchmark(name string, totalReqs int, concurrency int, reqFn func() (*ht
 				resp, err := client.Do(req)
 				dur := time.Since(t0)
 
-				if err != nil || resp.StatusCode >= 400 {
+				if err != nil || resp.StatusCode != expectedStatus {
 					mu.Lock()
 					errCount++
 					mu.Unlock()
@@ -132,7 +140,7 @@ func runBenchmark(name string, totalReqs int, concurrency int, reqFn func() (*ht
 	}
 }
 
-func setupFixtures(baseURL, adminToken string) (clientID, clientSecret, sessionID string, err error) {
+func setupFixtures(baseURL, adminToken string) (clientID, clientSecret, sessionID, seededEmail, seededPassword, seededAccessToken string, refreshTokens []string, err error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 
 	// 1. Create Application
@@ -150,19 +158,19 @@ func setupFixtures(baseURL, adminToken string) (clientID, clientSecret, sessionI
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", "", fmt.Errorf("create app error: %w", err)
+		return "", "", "", "", "", "", nil, fmt.Errorf("create app error: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return "", "", "", fmt.Errorf("create app failed (HTTP %d): %s", resp.StatusCode, string(body))
+		return "", "", "", "", "", "", nil, fmt.Errorf("create app failed (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 	var creds struct {
 		ClientID     string `json:"client_id"`
 		ClientSecret string `json:"client_secret"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&creds); err != nil {
-		return "", "", "", fmt.Errorf("decode app error: %w", err)
+		return "", "", "", "", "", "", nil, fmt.Errorf("decode app error: %w", err)
 	}
 	clientID = creds.ClientID
 	clientSecret = creds.ClientSecret
@@ -181,22 +189,65 @@ func setupFixtures(baseURL, adminToken string) (clientID, clientSecret, sessionI
 
 	respSess, err := client.Do(reqSess)
 	if err != nil {
-		return clientID, clientSecret, "", fmt.Errorf("create session error: %w", err)
+		return clientID, clientSecret, "", "", "", "", nil, fmt.Errorf("create session error: %w", err)
 	}
 	defer respSess.Body.Close()
 	if respSess.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(respSess.Body)
-		return clientID, clientSecret, "", fmt.Errorf("create session failed (HTTP %d): %s", respSess.StatusCode, string(body))
+		return clientID, clientSecret, "", "", "", "", nil, fmt.Errorf("create session failed (HTTP %d): %s", respSess.StatusCode, string(body))
 	}
 	var sess struct {
 		SessionID string `json:"session_id"`
 	}
 	if err := json.NewDecoder(respSess.Body).Decode(&sess); err != nil {
-		return clientID, clientSecret, "", fmt.Errorf("decode session error: %w", err)
+		return clientID, clientSecret, "", "", "", "", nil, fmt.Errorf("decode session error: %w", err)
 	}
 	sessionID = sess.SessionID
 
-	return clientID, clientSecret, sessionID, nil
+	// 3. Create Seeded User
+	seededEmail = fmt.Sprintf("seeded_bench_user_%d@example.com", time.Now().UnixNano())
+	seededPassword = "P@ssword123!Secure"
+	signupBody, _ := json.Marshal(map[string]string{
+		"email":    seededEmail,
+		"password": seededPassword,
+	})
+	reqSignup, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/auth/signup", bytes.NewReader(signupBody))
+	reqSignup.Header.Set("Content-Type", "application/json")
+	reqSignup.Header.Set("X-Application-Id", clientID)
+	respSignup, err := client.Do(reqSignup)
+	if err != nil {
+		return clientID, clientSecret, sessionID, "", "", "", nil, fmt.Errorf("signup seeded user error: %w", err)
+	}
+	_ = respSignup.Body.Close()
+
+	// 4. Login seeded user to get access token and refresh tokens
+	for i := 0; i < 220; i++ {
+		loginBody, _ := json.Marshal(map[string]string{
+			"email":    seededEmail,
+			"password": seededPassword,
+		})
+		reqLogin, _ := http.NewRequest(http.MethodPost, baseURL+"/api/v1/auth/login", bytes.NewReader(loginBody))
+		reqLogin.Header.Set("Content-Type", "application/json")
+		reqLogin.Header.Set("X-Application-Id", clientID)
+		respLogin, err := client.Do(reqLogin)
+		if err == nil && respLogin.StatusCode == http.StatusOK {
+			var tokenResp struct {
+				AccessToken  string  `json:"access_token"`
+				RefreshToken *string `json:"refresh_token"`
+			}
+			if err := json.NewDecoder(respLogin.Body).Decode(&tokenResp); err == nil {
+				if seededAccessToken == "" {
+					seededAccessToken = tokenResp.AccessToken
+				}
+				if tokenResp.RefreshToken != nil {
+					refreshTokens = append(refreshTokens, *tokenResp.RefreshToken)
+				}
+			}
+			_ = respLogin.Body.Close()
+		}
+	}
+
+	return clientID, clientSecret, sessionID, seededEmail, seededPassword, seededAccessToken, refreshTokens, nil
 }
 
 func main() {
@@ -230,7 +281,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	clientID, clientSecret, sessionID, err := setupFixtures(*baseURL, *adminToken)
+	clientID, clientSecret, sessionID, seededEmail, seededPassword, seededAccessToken, refreshTokens, err := setupFixtures(*baseURL, *adminToken)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to setup fixtures: %v\n", err)
 		os.Exit(1)
@@ -239,32 +290,32 @@ func main() {
 	var results []BenchResult
 
 	// Benchmark 1: GET /health (Concurrency 1)
-	results = append(results, runBenchmark("GET /health (c=1)", 1000, 1, func() (*http.Request, error) {
+	results = append(results, runBenchmark("GET /health (c=1)", 1000, 1, http.StatusOK, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, *baseURL+"/health", nil)
 	}))
 
 	// Benchmark 2: GET /health (Concurrency 20)
-	results = append(results, runBenchmark("GET /health (c=20)", 2000, 20, func() (*http.Request, error) {
+	results = append(results, runBenchmark("GET /health (c=20)", 2000, 20, http.StatusOK, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, *baseURL+"/health", nil)
 	}))
 
 	// Benchmark 3: GET /.well-known/openid-configuration (Concurrency 20)
-	results = append(results, runBenchmark("GET /.well-known/openid-configuration (c=20)", 1000, 20, func() (*http.Request, error) {
+	results = append(results, runBenchmark("GET /.well-known/openid-configuration (c=20)", 1000, 20, http.StatusOK, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, *baseURL+"/.well-known/openid-configuration", nil)
 	}))
 
 	// Benchmark 4: GET /.well-known/jwks.json (Firestore read, Concurrency 10)
-	results = append(results, runBenchmark("GET /.well-known/jwks.json (c=10)", 500, 10, func() (*http.Request, error) {
+	results = append(results, runBenchmark("GET /.well-known/jwks.json (c=10)", 500, 10, http.StatusOK, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, *baseURL+"/.well-known/jwks.json", nil)
 	}))
 
 	// Benchmark 5: GET /api/v1/auth-sessions/{id} (Multi-doc read, Concurrency 10)
-	results = append(results, runBenchmark("GET /api/v1/auth-sessions/{id} (c=10)", 500, 10, func() (*http.Request, error) {
+	results = append(results, runBenchmark("GET /api/v1/auth-sessions/{id} (c=10)", 300, 10, http.StatusOK, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, *baseURL+"/api/v1/auth-sessions/"+sessionID, nil)
 	}))
 
 	// Benchmark 6: POST /api/v1/oauth/token client_credentials (DB check + Ed25519 signing, Concurrency 10)
-	results = append(results, runBenchmark("POST /api/v1/oauth/token [client_credentials] (c=10)", 300, 10, func() (*http.Request, error) {
+	results = append(results, runBenchmark("POST /api/v1/oauth/token [client_credentials] (c=10)", 200, 10, http.StatusOK, func() (*http.Request, error) {
 		data := url.Values{}
 		data.Set("grant_type", "client_credentials")
 		data.Set("client_id", clientID)
@@ -275,6 +326,82 @@ func main() {
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		}
 		return req, err
+	}))
+
+	// Benchmark 7: GET /api/v1/auth/me [Profile] (Concurrency 10)
+	results = append(results, runBenchmark("GET /api/v1/auth/me [Profile] (c=10)", 300, 10, http.StatusOK, func() (*http.Request, error) {
+		req, err := http.NewRequest(http.MethodGet, *baseURL+"/api/v1/auth/me", nil)
+		if err == nil {
+			req.Header.Set("Authorization", "Bearer "+seededAccessToken)
+		}
+		return req, err
+	}))
+
+	// Benchmark 8: POST /api/v1/auth/login [valid credentials] (Concurrency 10)
+	loginValidBody, _ := json.Marshal(map[string]string{
+		"email":    seededEmail,
+		"password": seededPassword,
+	})
+	results = append(results, runBenchmark("POST /api/v1/auth/login [valid] (c=10)", 100, 10, http.StatusOK, func() (*http.Request, error) {
+		req, err := http.NewRequest(http.MethodPost, *baseURL+"/api/v1/auth/login", bytes.NewReader(loginValidBody))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Application-Id", clientID)
+		}
+		return req, err
+	}))
+
+	// Benchmark 9: POST /api/v1/auth/login [invalid credentials] (Concurrency 10)
+	loginInvalidBody, _ := json.Marshal(map[string]string{
+		"email":    seededEmail,
+		"password": "WrongPassword!Incorrect",
+	})
+	results = append(results, runBenchmark("POST /api/v1/auth/login [invalid] (c=10)", 100, 10, http.StatusUnauthorized, func() (*http.Request, error) {
+		req, err := http.NewRequest(http.MethodPost, *baseURL+"/api/v1/auth/login", bytes.NewReader(loginInvalidBody))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Application-Id", clientID)
+		}
+		return req, err
+	}))
+
+	// Benchmark 10: POST /api/v1/auth/signup [new user] (Concurrency 10)
+	var signupCounter uint64
+	results = append(results, runBenchmark("POST /api/v1/auth/signup (c=10)", 100, 10, http.StatusOK, func() (*http.Request, error) {
+		id := atomic.AddUint64(&signupCounter, 1)
+		body, _ := json.Marshal(map[string]string{
+			"email":    fmt.Sprintf("bench_user_%d_%d@example.com", time.Now().UnixNano(), id),
+			"password": "Password123!Secure",
+		})
+		req, err := http.NewRequest(http.MethodPost, *baseURL+"/api/v1/auth/signup", bytes.NewReader(body))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Application-Id", clientID)
+		}
+		return req, err
+	}))
+
+	// Benchmark 11: POST /api/v1/auth/refresh (Concurrency 10)
+	var rtIdx int64 = -1
+	results = append(results, runBenchmark("POST /api/v1/auth/refresh (c=10)", 100, 10, http.StatusOK, func() (*http.Request, error) {
+		idx := atomic.AddInt64(&rtIdx, 1)
+		if int(idx) >= len(refreshTokens) {
+			return nil, fmt.Errorf("exhausted refresh tokens")
+		}
+		body, _ := json.Marshal(map[string]string{
+			"refresh_token": refreshTokens[idx],
+		})
+		req, err := http.NewRequest(http.MethodPost, *baseURL+"/api/v1/auth/refresh", bytes.NewReader(body))
+		if err == nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		return req, err
+	}))
+
+	// Benchmark 12: GET /api/v1/oauth/authorize (Concurrency 10)
+	results = append(results, runBenchmark("GET /api/v1/oauth/authorize [redirect] (c=10)", 200, 10, http.StatusFound, func() (*http.Request, error) {
+		u := fmt.Sprintf("%s/api/v1/oauth/authorize?client_id=%s&redirect_uri=https://example.com/callback&response_type=code&code_challenge=dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk&code_challenge_method=S256", *baseURL, clientID)
+		return http.NewRequest(http.MethodGet, u, nil)
 	}))
 
 	if *jsonOutput {

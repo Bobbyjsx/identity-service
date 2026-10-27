@@ -106,6 +106,7 @@ func (s *OAuthService) ResolveClient(ctx context.Context, clientID string) (*mod
 	if app.Status != "active" {
 		return nil, core.NewOAuthError("invalid_client", "Application is not active", http.StatusBadRequest)
 	}
+	core.SetRequestApp(ctx, app.ClientID, app.Name)
 	return app, nil
 }
 
@@ -176,6 +177,10 @@ func (s *OAuthService) CreateSession(ctx context.Context, req AuthorizationReque
 	if err != nil {
 		return nil, err
 	}
+	return s.CreateSessionWithApp(ctx, app, req)
+}
+
+func (s *OAuthService) CreateSessionWithApp(ctx context.Context, app *models.Application, req AuthorizationRequest) (*models.AuthSession, error) {
 	if err := s.ValidateRedirect(app, req.RedirectURI); err != nil {
 		return nil, err
 	}
@@ -378,6 +383,7 @@ func (s *OAuthService) loadSessionForOperation(ctx context.Context, sessionID st
 	if err != nil || app == nil || app.Status != "active" {
 		return nil, nil, core.NewOAuthError("invalid_application", "Application is not active")
 	}
+	core.SetRequestApp(ctx, app.ClientID, app.Name)
 
 	return tx, app, nil
 }
@@ -392,7 +398,7 @@ func (s *OAuthService) Login(ctx context.Context, sessionID, email, password str
 		return nil, core.NewOAuthError("password_login_disabled", "Password login is disabled for this application")
 	}
 
-	user, err := s.authService.AuthenticateUser(ctx, tx.ClientID, email, password)
+	user, err := s.authService.AuthenticateUserWithApp(ctx, app, email, password)
 	if err != nil {
 		return nil, core.NewOAuthError("invalid_credentials", "Invalid email or password", http.StatusUnauthorized)
 	}
@@ -422,7 +428,7 @@ func (s *OAuthService) Signup(ctx context.Context, sessionID string, req Session
 		TurnstileToken: req.TurnstileToken,
 	}
 
-	user, err := s.authService.CreateUser(ctx, tx.ClientID, userCreate)
+	user, err := s.authService.CreateUserWithApp(ctx, app, userCreate)
 	if err != nil {
 		if httpErr, ok := err.(*core.HTTPError); ok {
 			errType := "signup_disabled"

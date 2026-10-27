@@ -6,9 +6,11 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -18,12 +20,15 @@ import (
 )
 
 type KeyManager struct {
-	cfg           *config.Config
-	db            *firestore.Client
-	CurrentKeyID  string
-	PrivateKey    ed25519.PrivateKey
-	PublicKey     ed25519.PublicKey
-	CollectionKey string
+	cfg            *config.Config
+	db             *firestore.Client
+	CurrentKeyID   string
+	PrivateKey     ed25519.PrivateKey
+	PublicKey      ed25519.PublicKey
+	CollectionKey  string
+	jwksMu         sync.RWMutex
+	cachedJWKS     map[string]interface{}
+	cachedJWKSJSON []byte
 }
 
 func NewKeyManager(cfg *config.Config) *KeyManager {
@@ -35,7 +40,10 @@ func NewKeyManager(cfg *config.Config) *KeyManager {
 
 func (km *KeyManager) Initialize(ctx context.Context, db *firestore.Client) error {
 	km.db = db
-	return km.loadOrGenerateKey(ctx)
+	if err := km.loadOrGenerateKey(ctx); err != nil {
+		return err
+	}
+	return km.RefreshJWKS(ctx)
 }
 
 func (km *KeyManager) loadOrGenerateKey(ctx context.Context) error {
@@ -161,7 +169,7 @@ func (km *KeyManager) VerifyJWT(tokenString string, audience []string) (jwt.MapC
 	return claims, nil
 }
 
-func (km *KeyManager) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+func (km *KeyManager) fetchJWKSFromDB(ctx context.Context) (map[string]interface{}, []byte, error) {
 	iter := km.db.Collection(km.CollectionKey).Where("status", "==", "active").Documents(ctx)
 	defer iter.Stop()
 
@@ -172,7 +180,7 @@ func (km *KeyManager) GetJWKS(ctx context.Context) (map[string]interface{}, erro
 			break
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		data := doc.Data()
@@ -211,5 +219,72 @@ func (km *KeyManager) GetJWKS(ctx context.Context) (map[string]interface{}, erro
 		keys = []map[string]interface{}{}
 	}
 
-	return map[string]interface{}{"keys": keys}, nil
+	jwksMap := map[string]interface{}{"keys": keys}
+	jwksJSON, err := json.Marshal(jwksMap)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return jwksMap, jwksJSON, nil
+}
+
+func (km *KeyManager) RefreshJWKS(ctx context.Context) error {
+	jwksMap, jwksJSON, err := km.fetchJWKSFromDB(ctx)
+	if err != nil {
+		return err
+	}
+
+	km.jwksMu.Lock()
+	km.cachedJWKS = jwksMap
+	km.cachedJWKSJSON = jwksJSON
+	km.jwksMu.Unlock()
+	return nil
+}
+
+func (km *KeyManager) GetJWKS(ctx context.Context) (map[string]interface{}, error) {
+	km.jwksMu.RLock()
+	cached := km.cachedJWKS
+	km.jwksMu.RUnlock()
+
+	if cached != nil {
+		return cached, nil
+	}
+
+	km.jwksMu.Lock()
+	defer km.jwksMu.Unlock()
+	if km.cachedJWKS != nil {
+		return km.cachedJWKS, nil
+	}
+
+	jwksMap, jwksJSON, err := km.fetchJWKSFromDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	km.cachedJWKS = jwksMap
+	km.cachedJWKSJSON = jwksJSON
+	return km.cachedJWKS, nil
+}
+
+func (km *KeyManager) GetJWKSBytes(ctx context.Context) ([]byte, error) {
+	km.jwksMu.RLock()
+	cachedJSON := km.cachedJWKSJSON
+	km.jwksMu.RUnlock()
+
+	if cachedJSON != nil {
+		return cachedJSON, nil
+	}
+
+	km.jwksMu.Lock()
+	defer km.jwksMu.Unlock()
+	if km.cachedJWKSJSON != nil {
+		return km.cachedJWKSJSON, nil
+	}
+
+	jwksMap, jwksJSON, err := km.fetchJWKSFromDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	km.cachedJWKS = jwksMap
+	km.cachedJWKSJSON = jwksJSON
+	return km.cachedJWKSJSON, nil
 }

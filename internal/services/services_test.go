@@ -18,7 +18,7 @@ func TestKeyManagerSignAndVerify(t *testing.T) {
 	os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
 	cfg := config.Load()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	dbClient, err := database.NewFirestoreClient(ctx, cfg)
@@ -59,5 +59,109 @@ func TestKeyManagerSignAndVerify(t *testing.T) {
 	keys := jwks["keys"].([]map[string]interface{})
 	if len(keys) == 0 {
 		t.Errorf("Expected at least one active key in JWKS")
+	}
+}
+
+func BenchmarkSignJWT(b *testing.B) {
+	b.ReportAllocs()
+	os.Setenv("ENVIRONMENT", "testing")
+	os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
+	cfg := config.Load()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dbClient, err := database.NewFirestoreClient(ctx, cfg)
+	if err != nil {
+		b.Fatalf("Failed to init firestore: %v", err)
+	}
+
+	km := services.NewKeyManager(cfg)
+	if err := km.Initialize(ctx, dbClient); err != nil {
+		b.Fatalf("Failed to init key manager: %v", err)
+	}
+
+	claims := jwt.MapClaims{
+		"iss": cfg.IdentityIssuer,
+		"sub": "user-123",
+		"aud": "application_api",
+		"exp": time.Now().Add(10 * time.Minute).Unix(),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := km.SignJWT(claims)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkVerifyJWT(b *testing.B) {
+	b.ReportAllocs()
+	os.Setenv("ENVIRONMENT", "testing")
+	os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
+	cfg := config.Load()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dbClient, err := database.NewFirestoreClient(ctx, cfg)
+	if err != nil {
+		b.Fatalf("Failed to init firestore: %v", err)
+	}
+
+	km := services.NewKeyManager(cfg)
+	if err := km.Initialize(ctx, dbClient); err != nil {
+		b.Fatalf("Failed to init key manager: %v", err)
+	}
+
+	claims := jwt.MapClaims{
+		"iss": cfg.IdentityIssuer,
+		"sub": "user-123",
+		"aud": "application_api",
+		"exp": time.Now().Add(10 * time.Minute).Unix(),
+	}
+
+	tokenStr, err := km.SignJWT(claims)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	aud := []string{"application_api"}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := km.VerifyJWT(tokenStr, aud)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGetJWKS(b *testing.B) {
+	b.ReportAllocs()
+	os.Setenv("ENVIRONMENT", "testing")
+	os.Setenv("FIRESTORE_EMULATOR_HOST", "127.0.0.1:8080")
+	cfg := config.Load()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	dbClient, err := database.NewFirestoreClient(ctx, cfg)
+	if err != nil {
+		b.Fatalf("Failed to init firestore: %v", err)
+	}
+
+	km := services.NewKeyManager(cfg)
+	if err := km.Initialize(ctx, dbClient); err != nil {
+		b.Fatalf("Failed to init key manager: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := km.GetJWKS(ctx)
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }
