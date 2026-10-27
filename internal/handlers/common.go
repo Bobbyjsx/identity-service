@@ -13,12 +13,13 @@ import (
 )
 
 type Server struct {
-	cfg         *config.Config
-	appService  *services.ApplicationService
-	authService *services.AuthService
-	oauthService *services.OAuthService
-	rbacService *services.RBACService
-	keyManager  *services.KeyManager
+	cfg              *config.Config
+	appService       *services.ApplicationService
+	authService      *services.AuthService
+	oauthService     *services.OAuthService
+	rbacService      *services.RBACService
+	keyManager       *services.KeyManager
+	openidConfigJSON []byte
 }
 
 func NewServer(
@@ -29,26 +30,53 @@ func NewServer(
 	rbacService *services.RBACService,
 	keyManager *services.KeyManager,
 ) *Server {
+	base := strings.TrimRight(cfg.PublicBaseURL, "/")
+	configMap := map[string]interface{}{
+		"issuer":                                cfg.IdentityIssuer,
+		"authorization_endpoint":                base + "/api/v1/oauth/authorize",
+		"token_endpoint":                        base + "/api/v1/oauth/token",
+		"jwks_uri":                              base + "/.well-known/jwks.json",
+		"response_types_supported":              []string{"code"},
+		"grant_types_supported":                 []string{"authorization_code", "client_credentials"},
+		"subject_types_supported":               []string{"public"},
+		"id_token_signing_alg_values_supported": []string{"EdDSA"},
+		"scopes_supported":                      []string{"email", "openid", "profile"},
+		"claims_supported": []string{
+			"iss",
+			"sub",
+			"aud",
+			"iat",
+			"exp",
+			"jti",
+			"nonce",
+			"email",
+			"email_verified",
+			"name",
+			"preferred_username",
+		},
+		"code_challenge_methods_supported":      []string{"S256"},
+		"token_endpoint_auth_methods_supported": []string{"none", "client_secret_post"},
+	}
+	openidJSON, _ := json.Marshal(configMap)
+
 	return &Server{
-		cfg:          cfg,
-		appService:   appService,
-		authService:  authService,
-		oauthService: oauthService,
-		rbacService:  rbacService,
-		keyManager:   keyManager,
+		cfg:              cfg,
+		appService:       appService,
+		authService:      authService,
+		oauthService:     oauthService,
+		rbacService:      rbacService,
+		keyManager:       keyManager,
+		openidConfigJSON: openidJSON,
 	}
 }
 
 func decodeJSON(r *http.Request, v interface{}) error {
 	defer r.Body.Close()
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
-		return err
-	}
-	if len(body) == 0 {
+	err := json.NewDecoder(io.LimitReader(r.Body, 1048576)).Decode(v)
+	if err == io.EOF {
 		return nil
 	}
-	return json.Unmarshal(body, v)
+	return err
 }
 
 func (s *Server) verifyAdmin(next http.HandlerFunc) http.HandlerFunc {
@@ -75,9 +103,11 @@ func (s *Server) verifyApp(next func(w http.ResponseWriter, r *http.Request, app
 		}
 		app, err := s.appService.GetByClientID(r.Context(), appID)
 		if err != nil || app == nil {
+			core.SetRequestApp(r.Context(), appID, "")
 			core.WriteDetail(w, http.StatusForbidden, "Invalid application context")
 			return
 		}
+		core.SetRequestApp(r.Context(), app.ClientID, app.Name)
 		next(w, r, app)
 	}
 }
@@ -101,6 +131,12 @@ func (s *Server) authenticateBearer(next func(w http.ResponseWriter, r *http.Req
 		if sub == "" || appID == "" {
 			core.WriteDetail(w, http.StatusUnauthorized, "Invalid token payload")
 			return
+		}
+
+		if app, _ := s.appService.GetByClientID(r.Context(), appID); app != nil {
+			core.SetRequestApp(r.Context(), app.ClientID, app.Name)
+		} else {
+			core.SetRequestApp(r.Context(), appID, "")
 		}
 
 		user, err := s.authService.GetUserByID(r.Context(), appID, sub)

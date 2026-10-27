@@ -12,7 +12,25 @@ import (
 	"identity-service/internal/config"
 )
 
-var TurnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+var (
+	TurnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+	defaultTurnstileClient = &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 20,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 5 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+		Timeout: 10 * time.Second,
+	}
+)
 
 type TurnstileResponse struct {
 	Success  bool     `json:"success"`
@@ -63,8 +81,7 @@ func VerifyTurnstileToken(ctx context.Context, cfg *config.Config, token string,
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := defaultTurnstileClient.Do(req)
 	if err != nil {
 		return NewHTTPError(http.StatusBadGateway, "Turnstile verification service unreachable.")
 	}

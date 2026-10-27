@@ -44,11 +44,13 @@ func (s *Server) OAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		nonce = &val
 	}
 
+	core.SetRequestApp(r.Context(), clientID, "")
 	app, err := s.oauthService.ResolveClient(r.Context(), clientID)
 	if err != nil {
 		handleError(w, err, true)
 		return
 	}
+	core.SetRequestApp(r.Context(), app.ClientID, app.Name)
 
 	if err := s.oauthService.ValidateRedirect(app, redirectURI); err != nil {
 		handleError(w, err, true)
@@ -66,7 +68,7 @@ func (s *Server) OAuthAuthorize(w http.ResponseWriter, r *http.Request) {
 		Nonce:               nonce,
 	}
 
-	tx, err := s.oauthService.CreateSession(r.Context(), req)
+	tx, err := s.oauthService.CreateSessionWithApp(r.Context(), app, req)
 	if err != nil {
 		if oauthErr, ok := err.(*core.OAuthError); ok {
 			redirectURL := s.oauthService.BuildErrorRedirect(redirectURI, state, oauthErr.ErrorType, oauthErr.ErrorDescription)
@@ -95,6 +97,10 @@ func (s *Server) OAuthToken(w http.ResponseWriter, r *http.Request) {
 	codeVerifier := r.FormValue("code_verifier")
 	audience := r.FormValue("audience")
 
+	if clientID != "" {
+		core.SetRequestApp(r.Context(), clientID, "")
+	}
+
 	if grantType == "" || clientID == "" {
 		core.WriteValidationError(w, "Field required: grant_type and client_id")
 		return
@@ -115,12 +121,13 @@ func (s *Server) OAuthToken(w http.ResponseWriter, r *http.Request) {
 			handleError(w, err, true)
 			return
 		}
+		core.SetRequestApp(r.Context(), app.ClientID, app.Name)
 		if err := s.oauthService.ValidateGrantAllowed(app, "client_credentials"); err != nil {
 			handleError(w, err, true)
 			return
 		}
 
-		appID, err := s.appService.VerifyClientCredentials(r.Context(), clientID, clientSecret)
+		appID, err := s.appService.VerifyClientCredentialsWithApp(r.Context(), app, clientSecret)
 		if err != nil {
 			core.WriteOAuthError(w, core.NewOAuthError("invalid_client", "Invalid client credentials", http.StatusUnauthorized))
 			return

@@ -39,7 +39,7 @@ func (s *Server) AuthSignup(w http.ResponseWriter, r *http.Request, app *models.
 		return
 	}
 
-	user, err := s.authService.CreateUser(r.Context(), app.ClientID, req)
+	user, err := s.authService.CreateUserWithApp(r.Context(), app, req)
 	if err != nil {
 		handleError(w, err, false)
 		return
@@ -76,7 +76,7 @@ func (s *Server) AuthLogin(w http.ResponseWriter, r *http.Request, app *models.A
 		return
 	}
 
-	tokens, err := s.authService.Login(r.Context(), app.ClientID, req)
+	tokens, err := s.authService.LoginWithApp(r.Context(), app, req)
 	if err != nil {
 		handleError(w, err, false)
 		return

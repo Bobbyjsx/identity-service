@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/firestore"
@@ -23,12 +24,51 @@ var (
 	KnownThemes      = map[string]bool{"light": true, "dark": true}
 )
 
+type cachedApp struct {
+	app       *models.Application
+	expiresAt time.Time
+}
+
 type ApplicationService struct {
-	db *firestore.Client
+	db              *firestore.Client
+	mu              sync.RWMutex
+	cacheByClientID map[string]cachedApp
+	cacheByID       map[string]cachedApp
+	cacheTTL        time.Duration
 }
 
 func NewApplicationService(db *firestore.Client) *ApplicationService {
-	return &ApplicationService{db: db}
+	return &ApplicationService{
+		db:              db,
+		cacheByClientID: make(map[string]cachedApp),
+		cacheByID:       make(map[string]cachedApp),
+		cacheTTL:        5 * time.Minute,
+	}
+}
+
+func (s *ApplicationService) cacheApp(app *models.Application) {
+	if app == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry := cachedApp{
+		app:       app,
+		expiresAt: time.Now().Add(s.cacheTTL),
+	}
+	s.cacheByClientID[app.ClientID] = entry
+	s.cacheByID[app.ID] = entry
+}
+
+func (s *ApplicationService) InvalidateCache(clientID, appID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if clientID != "" {
+		delete(s.cacheByClientID, clientID)
+	}
+	if appID != "" {
+		delete(s.cacheByID, appID)
+	}
 }
 
 type ApplicationAuthenticationRequest struct {
@@ -247,6 +287,18 @@ func parseThemes(v interface{}) []string {
 }
 
 func (s *ApplicationService) GetByClientID(ctx context.Context, clientID string) (*models.Application, error) {
+	if !core.IsTestEnvironment() {
+		s.mu.RLock()
+		if entry, ok := s.cacheByClientID[clientID]; ok {
+			if time.Now().Before(entry.expiresAt) {
+				s.mu.RUnlock()
+				core.SetRequestApp(ctx, entry.app.ClientID, entry.app.Name)
+				return entry.app, nil
+			}
+		}
+		s.mu.RUnlock()
+	}
+
 	iter := s.db.Collection("applications").Where("client_id", "==", clientID).Limit(1).Documents(ctx)
 	defer iter.Stop()
 
@@ -265,10 +317,27 @@ func (s *ApplicationService) GetByClientID(ctx context.Context, clientID string)
 	}
 	app.ID = doc.Ref.ID
 	applyApplicationDefaults(data, &app)
+
+	if !core.IsTestEnvironment() {
+		s.cacheApp(&app)
+	}
+	core.SetRequestApp(ctx, app.ClientID, app.Name)
 	return &app, nil
 }
 
 func (s *ApplicationService) GetByID(ctx context.Context, appID string) (*models.Application, error) {
+	if !core.IsTestEnvironment() {
+		s.mu.RLock()
+		if entry, ok := s.cacheByID[appID]; ok {
+			if time.Now().Before(entry.expiresAt) {
+				s.mu.RUnlock()
+				core.SetRequestApp(ctx, entry.app.ClientID, entry.app.Name)
+				return entry.app, nil
+			}
+		}
+		s.mu.RUnlock()
+	}
+
 	doc, err := s.db.Collection("applications").Doc(appID).Get(ctx)
 	if err != nil || !doc.Exists() {
 		return nil, nil
@@ -280,6 +349,11 @@ func (s *ApplicationService) GetByID(ctx context.Context, appID string) (*models
 	}
 	app.ID = doc.Ref.ID
 	applyApplicationDefaults(data, &app)
+
+	if !core.IsTestEnvironment() {
+		s.cacheApp(&app)
+	}
+	core.SetRequestApp(ctx, app.ClientID, app.Name)
 	return &app, nil
 }
 
@@ -470,6 +544,8 @@ func (s *ApplicationService) UpdateApplicationConfig(ctx context.Context, client
 		}
 	}
 
+	s.cacheApp(app)
+
 	return app, nil
 }
 
@@ -482,6 +558,10 @@ func (s *ApplicationService) VerifyClientCredentials(ctx context.Context, client
 		return "", core.NewHTTPError(http.StatusUnauthorized, "Invalid client credentials")
 	}
 
+	return s.VerifyClientCredentialsWithApp(ctx, app, clientSecret)
+}
+
+func (s *ApplicationService) VerifyClientCredentialsWithApp(ctx context.Context, app *models.Application, clientSecret string) (string, error) {
 	iter := s.db.Collection("application_credentials").Where("app_id", "==", app.ID).Documents(ctx)
 	defer iter.Stop()
 

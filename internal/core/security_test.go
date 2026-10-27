@@ -85,3 +85,71 @@ func TestPKCE(t *testing.T) {
 		t.Errorf("Generated challenge failed validation: %v", err)
 	}
 }
+
+func BenchmarkHashPassword_DefaultParams(b *testing.B) {
+	b.ReportAllocs()
+	password := "p@ssw0rd123!SecureEnough"
+	for i := 0; i < b.N; i++ {
+		_, err := core.HashPasswordWithParams(password, false)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkVerifyPassword_DefaultParams(b *testing.B) {
+	b.ReportAllocs()
+	password := "p@ssw0rd123!SecureEnough"
+	hash, err := core.HashPasswordWithParams(password, false)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !core.VerifyPassword(password, hash) {
+			b.Fatal("verify failed")
+		}
+	}
+}
+
+func BenchmarkHashPassword_TestParams(b *testing.B) {
+	b.ReportAllocs()
+	password := "p@ssw0rd123!SecureEnough"
+	for i := 0; i < b.N; i++ {
+		_, err := core.HashPasswordWithParams(password, true)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkVerifyPassword_TestParams(b *testing.B) {
+	b.ReportAllocs()
+	password := "p@ssw0rd123!SecureEnough"
+	hash, err := core.HashPasswordWithParams(password, true)
+	if err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !core.VerifyPassword(password, hash) {
+			b.Fatal("verify failed")
+		}
+	}
+}
+
+func BenchmarkTokenHashing(b *testing.B) {
+	b.ReportAllocs()
+	token := "some-high-entropy-token-1234567890abcdef"
+	for i := 0; i < b.N; i++ {
+		_ = core.HashToken(token)
+	}
+}
+
+func BenchmarkPKCE(b *testing.B) {
+	b.ReportAllocs()
+	verifier := "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+	for i := 0; i < b.N; i++ {
+		_ = core.PKCEVerifierToChallenge(verifier)
+	}
+}

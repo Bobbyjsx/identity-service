@@ -8,10 +8,26 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/alexedwards/argon2id"
 )
+
+var (
+	hashSemaphore = make(chan struct{}, getHashingConcurrency())
+)
+
+func getHashingConcurrency() int {
+	n := runtime.NumCPU() * 2
+	if n < 4 {
+		n = 4
+	}
+	if n > 32 {
+		n = 32
+	}
+	return n
+}
 
 var (
 	dangerousSchemes = map[string]bool{
@@ -42,8 +58,11 @@ func IsTestEnvironment() bool {
 	return env == "test" || env == "testing"
 }
 
-func HashPassword(password string) (string, error) {
-	if IsTestEnvironment() {
+func HashPasswordWithParams(password string, forceTestParams bool) (string, error) {
+	hashSemaphore <- struct{}{}
+	defer func() { <-hashSemaphore }()
+
+	if forceTestParams || IsTestEnvironment() {
 		params := &argon2id.Params{
 			Memory:      512,
 			Iterations:  1,
@@ -56,7 +75,14 @@ func HashPassword(password string) (string, error) {
 	return argon2id.CreateHash(password, argon2id.DefaultParams)
 }
 
+func HashPassword(password string) (string, error) {
+	return HashPasswordWithParams(password, false)
+}
+
 func VerifyPassword(password, hash string) bool {
+	hashSemaphore <- struct{}{}
+	defer func() { <-hashSemaphore }()
+
 	match, err := argon2id.ComparePasswordAndHash(password, hash)
 	if err != nil {
 		return false

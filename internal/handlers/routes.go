@@ -7,7 +7,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 
-	"identity-service/internal/core"
 	"identity-service/internal/docs"
 )
 
@@ -21,12 +20,14 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+var healthOKBytes = []byte(`{"status":"ok"}`)
+
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
+	r.Use(AppLoggerMiddleware)
 	r.Use(middleware.Recoverer)
 
 	r.Use(cors.Handler(cors.Options{
@@ -41,7 +42,9 @@ func (s *Server) Routes() http.Handler {
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		core.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(healthOKBytes)
 	})
 	r.Head("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

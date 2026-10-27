@@ -91,13 +91,20 @@ func (s *AuthService) CreateUser(ctx context.Context, appID string, req UserCrea
 	if app == nil {
 		return nil, core.NewHTTPError(http.StatusForbidden, "Invalid application context")
 	}
+	return s.CreateUserWithApp(ctx, app, req)
+}
+
+func (s *AuthService) CreateUserWithApp(ctx context.Context, app *models.Application, req UserCreateRequest) (*models.User, error) {
+	if app == nil {
+		return nil, core.NewHTTPError(http.StatusForbidden, "Invalid application context")
+	}
 
 	if !app.Authentication.AllowSignup {
 		return nil, core.NewHTTPError(http.StatusForbidden, "Signup is disabled for this application")
 	}
 
 	emailLower := strings.ToLower(strings.TrimSpace(req.Email))
-	existing, err := s.GetUserByEmail(ctx, appID, emailLower)
+	existing, err := s.GetUserByEmail(ctx, app.ClientID, emailLower)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +122,7 @@ func (s *AuthService) CreateUser(ctx context.Context, appID string, req UserCrea
 
 	user := models.User{
 		ID:             userID,
-		AppID:          appID,
+		AppID:          app.ClientID,
 		Email:          emailLower,
 		HashedPassword: hashed,
 		Username:       req.Username,
@@ -141,9 +148,16 @@ func (s *AuthService) AuthenticateUser(ctx context.Context, appID, email, passwo
 	if app == nil {
 		return nil, core.NewHTTPError(http.StatusForbidden, "Invalid application context")
 	}
+	return s.AuthenticateUserWithApp(ctx, app, email, password)
+}
+
+func (s *AuthService) AuthenticateUserWithApp(ctx context.Context, app *models.Application, email, password string) (*models.User, error) {
+	if app == nil {
+		return nil, core.NewHTTPError(http.StatusForbidden, "Invalid application context")
+	}
 
 	emailLower := strings.ToLower(strings.TrimSpace(email))
-	user, err := s.GetUserByEmail(ctx, appID, emailLower)
+	user, err := s.GetUserByEmail(ctx, app.ClientID, emailLower)
 	if err != nil {
 		return nil, err
 	}
@@ -229,8 +243,15 @@ func (s *AuthService) Login(ctx context.Context, appID string, req UserCreateReq
 	if app == nil {
 		return nil, core.NewHTTPError(http.StatusForbidden, "Invalid application context")
 	}
+	return s.LoginWithApp(ctx, app, req)
+}
 
-	user, err := s.AuthenticateUser(ctx, appID, req.Email, req.Password)
+func (s *AuthService) LoginWithApp(ctx context.Context, app *models.Application, req UserCreateRequest) (*models.TokenResponse, error) {
+	if app == nil {
+		return nil, core.NewHTTPError(http.StatusForbidden, "Invalid application context")
+	}
+
+	user, err := s.AuthenticateUserWithApp(ctx, app, req.Email, req.Password)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +260,7 @@ func (s *AuthService) Login(ctx context.Context, appID string, req UserCreateReq
 		return nil, core.NewHTTPError(http.StatusForbidden, "Email verification required before signing in.")
 	}
 
-	return s.IssueUserTokens(ctx, user, appID, nil)
+	return s.IssueUserTokens(ctx, user, app.ClientID, nil)
 }
 
 func (s *AuthService) GenerateServiceToken(appID, audience string) (*models.TokenResponse, error) {
