@@ -92,6 +92,13 @@
           "allowed_grants": { "type": "array", "items": { "type": "string" } }
         }
       },
+      "ApplicationLegalConfig": {
+        "type": "object",
+        "properties": {
+          "privacy": { "type": "string", "nullable": true },
+          "terms": { "type": "string", "nullable": true }
+        }
+      },
       "Application": {
         "type": "object",
         "properties": {
@@ -104,7 +111,8 @@
           "created_at": { "type": "string" },
           "branding": { "$ref": "#/components/schemas/ApplicationBranding" },
           "authentication": { "$ref": "#/components/schemas/ApplicationAuthenticationConfig" },
-          "oauth": { "$ref": "#/components/schemas/ApplicationOAuthConfig" }
+          "oauth": { "$ref": "#/components/schemas/ApplicationOAuthConfig" },
+          "legal": { "$ref": "#/components/schemas/ApplicationLegalConfig" }
         }
       },
       "ApplicationCredentials": {
@@ -123,7 +131,8 @@
           "client_type": { "type": "string", "default": "web" },
           "branding": { "$ref": "#/components/schemas/ApplicationBranding" },
           "authentication": { "$ref": "#/components/schemas/ApplicationAuthenticationConfig" },
-          "oauth": { "$ref": "#/components/schemas/ApplicationOAuthConfig" }
+          "oauth": { "$ref": "#/components/schemas/ApplicationOAuthConfig" },
+          "legal": { "$ref": "#/components/schemas/ApplicationLegalConfig" }
         }
       },
       "PublicApplicationConfig": {
@@ -139,7 +148,8 @@
           "allow_signup": { "type": "boolean" },
           "allow_password_login": { "type": "boolean" },
           "require_email_verification": { "type": "boolean" },
-          "allowed_scopes": { "type": "array", "items": { "type": "string" } }
+          "allowed_scopes": { "type": "array", "items": { "type": "string" } },
+          "legal": { "$ref": "#/components/schemas/ApplicationLegalConfig" }
         }
       },
       "UserCreateRequest": {

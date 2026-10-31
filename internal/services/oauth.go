@@ -279,6 +279,14 @@ func (s *OAuthService) LoadSession(ctx context.Context, sessionID string) (*mode
 		return nil, core.NewOAuthError("invalid_application", "Application not found", http.StatusNotFound)
 	}
 
+	var legalMap map[string]interface{}
+	if app.Legal != nil {
+		legalMap = map[string]interface{}{
+			"privacy": app.Legal.Privacy,
+			"terms":   app.Legal.Terms,
+		}
+	}
+
 	appMap := map[string]interface{}{
 		"name":                       app.Name,
 		"description":                app.Description,
@@ -290,6 +298,7 @@ func (s *OAuthService) LoadSession(ctx context.Context, sessionID string) (*mode
 		"allow_signup":               app.Authentication.AllowSignup,
 		"allow_password_login":       app.Authentication.AllowPasswordLogin,
 		"require_email_verification": app.Authentication.RequireEmailVerification,
+		"legal":                      legalMap,
 	}
 
 	var redirectURL *string
@@ -1136,5 +1145,6 @@ func (s *OAuthService) GetPublicConfiguration(ctx context.Context, clientID stri
 		AllowPasswordLogin:       app.Authentication.AllowPasswordLogin,
 		RequireEmailVerification: app.Authentication.RequireEmailVerification,
 		AllowedScopes:            allowedScopes,
+		Legal:                    app.Legal,
 	}, nil
 }
