@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"identity-service/internal/core"
+	"identity-service/internal/monitoring"
 )
 
 var logChan = make(chan string, 20000)
@@ -85,6 +86,22 @@ func AppLoggerMiddleware(next http.Handler) http.Handler {
 			msg = fmt.Sprintf("[HTTP] %s %s -> %d (%dB) in %s [app: %s] [ip: %s]",
 				r.Method, r.URL.Path, status, ww.BytesWritten(), formatRequestDuration(elapsed), appDesc, ip)
 		}
+
+		severity := "INFO"
+		if status >= 500 {
+			severity = "ERROR"
+		} else if status >= 400 {
+			severity = "WARN"
+		}
+
+		monitoring.RecordLog(r.Context(), severity, msg, map[string]any{
+			"http.status_code": status,
+			"http.method":      r.Method,
+			"http.path":        r.URL.Path,
+			"duration_ms":      float64(elapsed.Microseconds()) / 1000.0,
+			"client.ip":        ip,
+			"app.id":           clientID,
+		})
 
 		select {
 		case logChan <- msg:

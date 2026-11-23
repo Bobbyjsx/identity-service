@@ -3,8 +3,12 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"os"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -13,6 +17,30 @@ import (
 	"identity-service/internal/config"
 	"identity-service/internal/core"
 )
+
+// logWriter wraps an io.Writer (e.g. os.Stdout) and forwards standard library log output
+// to New Relic as application log events.
+type logWriter struct {
+	output io.Writer
+	app    *newrelic.Application
+}
+
+func (w *logWriter) Write(p []byte) (n int, err error) {
+	if w.output != nil {
+		n, err = w.output.Write(p)
+	}
+	if w.app != nil {
+		msg := strings.TrimRight(string(p), "\r\n")
+		if msg != "" {
+			w.app.RecordLog(newrelic.LogData{
+				Timestamp: time.Now().UnixMilli(),
+				Severity:  "INFO",
+				Message:   msg,
+			})
+		}
+	}
+	return n, err
+}
 
 // InitNewRelic initializes the New Relic Application from configuration.
 // If New Relic is not enabled or the license key is missing, it returns nil, nil.
@@ -26,7 +54,9 @@ func InitNewRelic(cfg *config.Config) (*newrelic.Application, error) {
 		newrelic.ConfigAppName(cfg.NewRelicAppName),
 		newrelic.ConfigLicense(cfg.NewRelicLicenseKey),
 		newrelic.ConfigDistributedTracerEnabled(true),
+		newrelic.ConfigAppLogEnabled(true),
 		newrelic.ConfigAppLogForwardingEnabled(true),
+		newrelic.ConfigAppLogMetricsEnabled(true),
 		newrelic.ConfigLabels(map[string]string{
 			"environment": cfg.Environment,
 		}),
@@ -36,6 +66,9 @@ func InitNewRelic(cfg *config.Config) (*newrelic.Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize New Relic: %w", err)
 	}
+
+	// Instrument standard library log with New Relic log forwarding
+	log.SetOutput(&logWriter{output: os.Stdout, app: app})
 
 	log.Printf("[NewRelic] Monitoring initialized for application %q (environment: %s)", cfg.NewRelicAppName, cfg.Environment)
 	return app, nil
@@ -153,4 +186,27 @@ func AddAttribute(ctx context.Context, key string, val any) {
 	if txn := newrelic.FromContext(ctx); txn != nil {
 		txn.AddAttribute(key, val)
 	}
+}
+
+// RecordLog records a log line in the active New Relic transaction with trace correlation (Logs in Context).
+func RecordLog(ctx context.Context, severity, message string, attrs ...map[string]any) {
+	if message == "" || ctx == nil {
+		return
+	}
+	txn := newrelic.FromContext(ctx)
+	if txn == nil {
+		return
+	}
+
+	var extraAttrs map[string]any
+	if len(attrs) > 0 {
+		extraAttrs = attrs[0]
+	}
+
+	txn.RecordLog(newrelic.LogData{
+		Timestamp:  time.Now().UnixMilli(),
+		Severity:   severity,
+		Message:    message,
+		Attributes: extraAttrs,
+	})
 }

@@ -1,6 +1,7 @@
 package monitoring
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -176,4 +177,33 @@ func TestHelperFunctions_NonNilContext(t *testing.T) {
 	SetUserID(ctx, "")
 	AddAttribute(ctx, "key", "val")
 	AddAttribute(ctx, "", "val")
+}
+
+func TestRecordLog(t *testing.T) {
+	RecordLog(nil, "INFO", "msg")
+	RecordLog(context.Background(), "INFO", "")
+	RecordLog(context.Background(), "INFO", "valid message", map[string]any{"key": "val"})
+
+	app, err := newrelic.NewApplication(
+		newrelic.ConfigAppName("test-service"),
+		newrelic.ConfigLicense("0123456789abcdef0123456789abcdef01234567"),
+		newrelic.ConfigEnabled(false),
+	)
+	require.NoError(t, err)
+
+	txn := app.StartTransaction("test-txn")
+	defer txn.End()
+	ctx := newrelic.NewContext(context.Background(), txn)
+
+	RecordLog(ctx, "INFO", "transaction message", map[string]any{"status": 200})
+}
+
+func TestLogWriter(t *testing.T) {
+	var buf bytes.Buffer
+	lw := &logWriter{output: &buf, app: nil}
+
+	n, err := lw.Write([]byte("hello world\n"))
+	assert.NoError(t, err)
+	assert.Equal(t, 12, n)
+	assert.Equal(t, "hello world\n", buf.String())
 }
