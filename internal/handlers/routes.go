@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/cors"
 
 	"identity-service/internal/docs"
+	"identity-service/internal/monitoring"
 )
 
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
@@ -27,6 +28,7 @@ func (s *Server) Routes() http.Handler {
 
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
+	r.Use(monitoring.Middleware(s.nrApp, s.cfg.Environment))
 	r.Use(AppLoggerMiddleware)
 	r.Use(middleware.Recoverer)
 

@@ -6,9 +6,12 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/newrelic/go-agent/v3/newrelic"
+
 	"identity-service/internal/config"
 	"identity-service/internal/core"
 	"identity-service/internal/models"
+	"identity-service/internal/monitoring"
 	"identity-service/internal/services"
 )
 
@@ -19,6 +22,7 @@ type Server struct {
 	oauthService     *services.OAuthService
 	rbacService      *services.RBACService
 	keyManager       *services.KeyManager
+	nrApp            *newrelic.Application
 	openidConfigJSON []byte
 }
 
@@ -29,6 +33,7 @@ func NewServer(
 	oauthService *services.OAuthService,
 	rbacService *services.RBACService,
 	keyManager *services.KeyManager,
+	nrApp ...*newrelic.Application,
 ) *Server {
 	base := strings.TrimRight(cfg.PublicBaseURL, "/")
 	configMap := map[string]interface{}{
@@ -59,6 +64,11 @@ func NewServer(
 	}
 	openidJSON, _ := json.Marshal(configMap)
 
+	var nr *newrelic.Application
+	if len(nrApp) > 0 {
+		nr = nrApp[0]
+	}
+
 	return &Server{
 		cfg:              cfg,
 		appService:       appService,
@@ -66,8 +76,13 @@ func NewServer(
 		oauthService:     oauthService,
 		rbacService:      rbacService,
 		keyManager:       keyManager,
+		nrApp:            nr,
 		openidConfigJSON: openidJSON,
 	}
+}
+
+func (s *Server) SetNewRelicApp(app *newrelic.Application) {
+	s.nrApp = app
 }
 
 func decodeJSON(r *http.Request, v interface{}) error {
@@ -108,6 +123,8 @@ func (s *Server) verifyApp(next func(w http.ResponseWriter, r *http.Request, app
 			return
 		}
 		core.SetRequestApp(r.Context(), app.ClientID, app.Name)
+		monitoring.AddAttribute(r.Context(), "app.client_id", app.ClientID)
+		monitoring.AddAttribute(r.Context(), "app.name", app.Name)
 		next(w, r, app)
 	}
 }
@@ -144,6 +161,8 @@ func (s *Server) authenticateBearer(next func(w http.ResponseWriter, r *http.Req
 			core.WriteDetail(w, http.StatusUnauthorized, "User not found")
 			return
 		}
+
+		monitoring.SetUserID(r.Context(), user.ID)
 
 		next(w, r, user)
 	}

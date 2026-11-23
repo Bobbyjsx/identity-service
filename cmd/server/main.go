@@ -13,11 +13,17 @@ import (
 	"identity-service/internal/config"
 	"identity-service/internal/database"
 	"identity-service/internal/handlers"
+	"identity-service/internal/monitoring"
 	"identity-service/internal/services"
 )
 
 func main() {
 	cfg := config.Load()
+
+	nrApp, err := monitoring.InitNewRelic(cfg)
+	if err != nil {
+		log.Printf("Warning: Failed to initialize New Relic: %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -52,7 +58,7 @@ func main() {
 	oauthService := services.NewOAuthService(cfg, dbClient, appService, authService, keyManager, notifService)
 	rbacService := services.NewRBACService(dbClient)
 
-	server := handlers.NewServer(cfg, appService, authService, oauthService, rbacService, keyManager)
+	server := handlers.NewServer(cfg, appService, authService, oauthService, rbacService, keyManager, nrApp)
 	router := server.Routes()
 
 	addr := fmt.Sprintf("0.0.0.0:%s", cfg.Port)
@@ -81,6 +87,10 @@ func main() {
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	if nrApp != nil {
+		nrApp.Shutdown(5 * time.Second)
 	}
 
 	log.Println("Server exiting")
