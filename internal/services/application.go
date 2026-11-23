@@ -84,8 +84,26 @@ type ApplicationCreateRequest struct {
 	Branding       *models.ApplicationBranding       `json:"branding"`
 	Authentication *ApplicationAuthenticationRequest `json:"authentication"`
 	OAuth          *models.ApplicationOAuthConfig    `json:"oauth"`
+	Legal          *models.ApplicationLegalConfig    `json:"legal"`
 	Theme          interface{}                       `json:"theme"`
 	Themes         interface{}                       `json:"themes"`
+}
+
+func validateLegalURL(urlStr string) error {
+	trimmed := strings.TrimSpace(urlStr)
+	if trimmed == "" {
+		return fmt.Errorf("URL cannot be empty")
+	}
+	if len(trimmed) > 2048 {
+		return fmt.Errorf("URL is too long")
+	}
+	if err := core.RejectUnsafeText(trimmed); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(trimmed, "http://") && !strings.HasPrefix(trimmed, "https://") {
+		return fmt.Errorf("URL must start with http:// or https://")
+	}
+	return nil
 }
 
 func GenerateSecureToken(byteLen int) string {
@@ -221,6 +239,32 @@ func (s *ApplicationService) RegisterApplication(ctx context.Context, req Applic
 		}
 	}
 
+	var legal *models.ApplicationLegalConfig
+	if req.Legal != nil {
+		l := &models.ApplicationLegalConfig{}
+		if req.Legal.Privacy != nil {
+			pStr := strings.TrimSpace(*req.Legal.Privacy)
+			if pStr != "" {
+				if err := validateLegalURL(pStr); err != nil {
+					return nil, core.NewHTTPError(http.StatusUnprocessableEntity, "Invalid privacy URL: "+err.Error())
+				}
+				l.Privacy = &pStr
+			}
+		}
+		if req.Legal.Terms != nil {
+			tStr := strings.TrimSpace(*req.Legal.Terms)
+			if tStr != "" {
+				if err := validateLegalURL(tStr); err != nil {
+					return nil, core.NewHTTPError(http.StatusUnprocessableEntity, "Invalid terms URL: "+err.Error())
+				}
+				l.Terms = &tStr
+			}
+		}
+		if l.Privacy != nil || l.Terms != nil {
+			legal = l
+		}
+	}
+
 	appID := uuid.New().String()
 	clientID := fmt.Sprintf("app_%s", strings.ReplaceAll(uuid.New().String(), "-", ""))
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -236,6 +280,7 @@ func (s *ApplicationService) RegisterApplication(ctx context.Context, req Applic
 		Branding:       branding,
 		Authentication: authConfig,
 		OAuth:          oauthConfig,
+		Legal:          legal,
 	}
 
 	clientSecret := GenerateSecureToken(32)
@@ -376,6 +421,18 @@ func applyApplicationDefaults(data map[string]interface{}, app *models.Applicati
 		}
 	} else {
 		app.OAuth.AllowedScopes = []string{"openid", "profile", "email"}
+	}
+
+	if legalMap, ok := data["legal"].(map[string]interface{}); ok {
+		if app.Legal == nil {
+			app.Legal = &models.ApplicationLegalConfig{}
+		}
+		if p, ok := legalMap["privacy"].(string); ok && p != "" {
+			app.Legal.Privacy = &p
+		}
+		if t, ok := legalMap["terms"].(string); ok && t != "" {
+			app.Legal.Terms = &t
+		}
 	}
 }
 
@@ -531,6 +588,58 @@ func (s *ApplicationService) UpdateApplicationConfig(ctx context.Context, client
 			}
 			patch["oauth"] = o
 			app.OAuth = o
+		}
+	}
+
+	if legalRaw, ok := updates["legal"]; ok {
+		if legalRaw == nil {
+			patch["legal"] = nil
+			app.Legal = nil
+		} else if legalMap, ok := legalRaw.(map[string]interface{}); ok {
+			l := app.Legal
+			if l == nil {
+				l = &models.ApplicationLegalConfig{}
+			}
+			if p, exists := legalMap["privacy"]; exists {
+				if p != nil {
+					pStr, ok := p.(string)
+					if !ok {
+						return nil, core.NewHTTPError(http.StatusUnprocessableEntity, "Invalid privacy URL")
+					}
+					pStr = strings.TrimSpace(pStr)
+					if pStr != "" {
+						if err := validateLegalURL(pStr); err != nil {
+							return nil, core.NewHTTPError(http.StatusUnprocessableEntity, "Invalid privacy URL: "+err.Error())
+						}
+						l.Privacy = &pStr
+					} else {
+						l.Privacy = nil
+					}
+				} else {
+					l.Privacy = nil
+				}
+			}
+			if t, exists := legalMap["terms"]; exists {
+				if t != nil {
+					tStr, ok := t.(string)
+					if !ok {
+						return nil, core.NewHTTPError(http.StatusUnprocessableEntity, "Invalid terms URL")
+					}
+					tStr = strings.TrimSpace(tStr)
+					if tStr != "" {
+						if err := validateLegalURL(tStr); err != nil {
+							return nil, core.NewHTTPError(http.StatusUnprocessableEntity, "Invalid terms URL: "+err.Error())
+						}
+						l.Terms = &tStr
+					} else {
+						l.Terms = nil
+					}
+				} else {
+					l.Terms = nil
+				}
+			}
+			patch["legal"] = l
+			app.Legal = l
 		}
 	}
 

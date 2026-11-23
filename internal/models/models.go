@@ -20,6 +20,11 @@ type ApplicationOAuthConfig struct {
 	AllowedGrants []string `json:"allowed_grants" firestore:"allowed_grants"`
 }
 
+type ApplicationLegalConfig struct {
+	Privacy *string `json:"privacy" firestore:"privacy"`
+	Terms   *string `json:"terms" firestore:"terms"`
+}
+
 type Application struct {
 	ID             string                          `json:"id" firestore:"id"`
 	Name           string                          `json:"name" firestore:"name"`
@@ -31,6 +36,7 @@ type Application struct {
 	Branding       ApplicationBranding             `json:"branding" firestore:"branding"`
 	Authentication ApplicationAuthenticationConfig `json:"authentication" firestore:"authentication"`
 	OAuth          ApplicationOAuthConfig          `json:"oauth" firestore:"oauth"`
+	Legal          *ApplicationLegalConfig         `json:"legal,omitempty" firestore:"legal,omitempty"`
 }
 
 type ApplicationCredentials struct {
@@ -47,17 +53,18 @@ type ApplicationCredential struct {
 }
 
 type PublicApplicationConfig struct {
-	Name                     string   `json:"name"`
-	Description              *string  `json:"description"`
-	LogoURL                  *string  `json:"logo_url"`
-	LogoWithText             *string  `json:"logo_with_text"`
-	PrimaryColor             *string  `json:"primary_color"`
-	SecondaryColor           *string  `json:"secondary_color"`
-	Themes                   []string `json:"themes"`
-	AllowSignup              bool     `json:"allow_signup"`
-	AllowPasswordLogin       bool     `json:"allow_password_login"`
-	RequireEmailVerification bool     `json:"require_email_verification"`
-	AllowedScopes            []string `json:"allowed_scopes"`
+	Name                     string                  `json:"name"`
+	Description              *string                 `json:"description"`
+	LogoURL                  *string                 `json:"logo_url"`
+	LogoWithText             *string                 `json:"logo_with_text"`
+	PrimaryColor             *string                 `json:"primary_color"`
+	SecondaryColor           *string                 `json:"secondary_color"`
+	Themes                   []string                `json:"themes"`
+	AllowSignup              bool                    `json:"allow_signup"`
+	AllowPasswordLogin       bool                    `json:"allow_password_login"`
+	RequireEmailVerification bool                    `json:"require_email_verification"`
+	AllowedScopes            []string                `json:"allowed_scopes"`
+	Legal                    *ApplicationLegalConfig `json:"legal,omitempty"`
 }
 
 type User struct {

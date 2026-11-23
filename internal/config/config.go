@@ -29,6 +29,9 @@ type Config struct {
 	GCPProjectID                            string
 	PubSubTopicID                           string
 	Port                                    string
+	NewRelicLicenseKey                      string
+	NewRelicAppName                         string
+	NewRelicEnabled                         bool
 }
 
 func getEnv(key, defaultVal string) string {
@@ -86,6 +89,10 @@ func Load() *Config {
 		env = os.Getenv("IDENTITY_ENVIRONMENT")
 	}
 
+	newRelicLicenseKey := getEnv("NEW_RELIC_LICENSE_KEY", "")
+	newRelicAppName := getEnv("NEW_RELIC_APP_NAME", "identity-service-"+env)
+	newRelicEnabled := getEnvBool("NEW_RELIC_ENABLED", newRelicLicenseKey != "")
+
 	return &Config{
 		Environment:                             env,
 		FirestoreDatabase:                       getEnv("FIRESTORE_DATABASE", "(default)"),
@@ -109,5 +116,8 @@ func Load() *Config {
 		GCPProjectID:                            getEnv("GCP_PROJECT_ID", "project-atlas-501612"),
 		PubSubTopicID:                           getEnv("PUBSUB_TOPIC_ID", "platform-events"),
 		Port:                                    getEnv("PORT", "8001"),
+		NewRelicLicenseKey:                      newRelicLicenseKey,
+		NewRelicAppName:                         newRelicAppName,
+		NewRelicEnabled:                         newRelicEnabled,
 	}
 }

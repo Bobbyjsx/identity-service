@@ -75,6 +75,10 @@ func TestApplicationConfigPersisted(t *testing.T) {
 			"allowed_scopes": []string{"openid", "email"},
 			"allowed_grants": []string{"authorization_code"},
 		},
+		"legal": map[string]interface{}{
+			"privacy": "https://example.com/privacy",
+			"terms":   "https://example.com/terms",
+		},
 	}, "")
 
 	resp := h.Client.Get(fmt.Sprintf("/api/v1/applications/%s/configuration", appData["client_id"]), nil, nil)
@@ -87,6 +91,11 @@ func TestApplicationConfigPersisted(t *testing.T) {
 	assert.Equal(t, false, config["allow_signup"])
 	assert.Equal(t, true, config["require_email_verification"])
 	assert.Equal(t, []interface{}{"openid", "email"}, config["allowed_scopes"])
+
+	legalMap, ok := config["legal"].(map[string]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, "https://example.com/privacy", legalMap["privacy"])
+	assert.Equal(t, "https://example.com/terms", legalMap["terms"])
 }
 
 func TestApplicationConfigValidationRejectsDangerousValues(t *testing.T) {
@@ -108,6 +117,9 @@ func TestApplicationConfigValidationRejectsDangerousValues(t *testing.T) {
 		{"name": "<script>alert(1)</script>"},
 		{"description": "ok <img src=x onerror=alert(1)>"},
 		{"client_type": "trusted"},
+		{"legal": map[string]interface{}{"privacy": "javascript:alert(1)"}},
+		{"legal": map[string]interface{}{"terms": "not-a-valid-url"}},
+		{"legal": map[string]interface{}{"privacy": "ftp://example.com/privacy"}},
 	}
 
 	for _, c := range cases {
@@ -156,10 +168,21 @@ func TestApplicationConfigPartialUpdateMerges(t *testing.T) {
 	)
 	require.Equal(t, http.StatusOK, resp2.StatusCode)
 
+	resp3 := h.Client.Patch(
+		fmt.Sprintf("/api/v1/admin/applications/%s/configuration", clientID),
+		map[string]interface{}{"legal": map[string]interface{}{"privacy": "https://dealscout.ai/privacy", "terms": "https://dealscout.ai/terms"}},
+		map[string]string{"X-Admin-Token": h.Config.AdminSecret},
+	)
+	require.Equal(t, http.StatusOK, resp3.StatusCode)
+
 	config := h.Client.Get(fmt.Sprintf("/api/v1/applications/%s/configuration", clientID), nil, nil).JSONMap()
 	assert.Equal(t, "#aabbcc", config["primary_color"])
 	assert.Equal(t, false, config["allow_signup"])
 	assert.Equal(t, true, config["allow_password_login"])
+	legalUpdated, ok := config["legal"].(map[string]interface{})
+	assert.True(t, ok)
+	assert.Equal(t, "https://dealscout.ai/privacy", legalUpdated["privacy"])
+	assert.Equal(t, "https://dealscout.ai/terms", legalUpdated["terms"])
 }
 
 func TestPublicConfigurationUnknownClient(t *testing.T) {

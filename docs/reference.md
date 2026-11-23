@@ -83,6 +83,9 @@ Both require `X-Application-Id`.
 | `AUTH_SESSION_EXPIRATION_MINUTES` | `10` | How long a login session stays usable. |
 | `OAUTH_AUTHORIZATION_CODE_EXPIRATION_MINUTES` | `5` | How long a `code` can be exchanged. |
 | `PASSWORD_RESET_TOKEN_EXPIRATION_MINUTES` | `30` | Reset-token lifetime. |
+| `NEW_RELIC_LICENSE_KEY` | unset | New Relic ingestion license key. |
+| `NEW_RELIC_APP_NAME` | `identity-service-<env>` | Application name in New Relic APM. |
+| `NEW_RELIC_ENABLED` | `true` if key present | Toggle New Relic APM agent (defaults to `true` when license key is provided). |
 
 `REFRESH_TOKEN_EXPIRATION_DAYS` is accepted by settings but refresh
 tokens are issued with a 7-day lifetime in code. Treat 7 days as the
